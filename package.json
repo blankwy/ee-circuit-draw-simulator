@@ -13,8 +13,8 @@
     "url": "https://github.com/blankwy/ee-circuit-draw-simulator/issues"
   },
   "bin": {
-    "ee-circuit-draw-simulator": "./scripts/circuitlab.mjs",
-    "circuitlab": "./scripts/circuitlab.mjs"
+    "ee-circuit-draw-simulator": "scripts/circuitlab.mjs",
+    "circuitlab": "scripts/circuitlab.mjs"
   },
   "files": [
     "SKILL.md",
