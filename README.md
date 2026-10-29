@@ -51,7 +51,7 @@ cd ~/ee-circuit-draw-simulator
 node scripts/circuitlab.mjs setup
 ```
 
-`setup` clones the engine into `vendor/ExtCircuitJS`, installs its build dependencies and builds `dist/`. One time, 2–5 minutes. Already have an engine checkout? Skip this and point at it:
+`setup` clones the engine into `vendor/ExtCircuitJS`, installs its build dependencies plus the headless-browser driver (`playwright-core`), and builds `dist/`. One time, ~2–4 minutes. Already have an engine checkout? Skip this and point at it:
 
 ```bash
 export EXTCIRCUIT_HOME=/path/to/ExtCircuitJS

@@ -742,6 +742,7 @@ function runStep(cmd, args, cwd, label) {
         encoding: "utf8",
         maxBuffer: 32 * 1024 * 1024,
         timeout: 10 * 60 * 1000,
+        shell: process.platform === "win32", // npm 在 Windows 上是 .cmd
     });
     if (r.error) throw new CliError(`${label} 失败：${r.error.message}`);
     if (r.status !== 0) {
@@ -790,6 +791,17 @@ async function cmdSetup(o) {
         steps.push({ step: "build", status: fs.existsSync(distHtml) ? "already" : "skipped" });
     }
 
+    // 引擎不把 playwright-core 写进依赖（只跑 Node 契约的人不需要它），但 MCP 桥必须有它。
+    // --no-save：装进 node_modules 而不改动引擎的 package.json。
+    const pwCore = path.join(dir, "node_modules", "playwright-core", "package.json");
+    const pwReady = fs.existsSync(pwCore) || Boolean(process.env.EXT_PW_CORE);
+    if (!o["skip-install"] && !pwReady) {
+        runStep("npm", ["install", "--no-save", "--no-audit", "--no-fund", "playwright-core"], dir, "安装 playwright-core（无头浏览器驱动）");
+        steps.push({ step: "playwright-core", status: "ok" });
+    } else {
+        steps.push({ step: "playwright-core", status: pwReady ? "already" : "skipped" });
+    }
+
     const hasDist = fs.existsSync(distHtml);
     return {
         ok: true,
@@ -816,6 +828,16 @@ async function cmdProbe(o) {
         chosen: live?.base ?? null,
         pages: "https://blankwy.github.io/ExtCircuitJS/circuitjs.html —— 只能给人点开看，MCP 无法驱动（backend 探活只认 http）",
     };
+    if (repo) {
+        const pwCore = path.join(repo, "node_modules", "playwright-core", "package.json");
+        out.capabilities = {
+            dist: fs.existsSync(path.join(repo, "dist", "circuitjs.html")),
+            playwrightCore: fs.existsSync(pwCore) || Boolean(process.env.EXT_PW_CORE),
+        };
+        if (!out.capabilities.playwrightCore) {
+            out.hint = ["缺 playwright-core（无头浏览器驱动），补一次就好：", `  cd ${repo} && npm install --no-save playwright-core`];
+        }
+    }
     if (o.attach && live) {
         try {
             const { backend, base, via } = await attach({ repo, base: live.base, allowSpawn: false, log });
@@ -832,7 +854,7 @@ async function cmdProbe(o) {
             "  node <skill>/scripts/circuitlab.mjs setup",
             `找过的位置：${tried.slice(0, 5).join(" / ")}`,
         ];
-    } else if (!out.ok) {
+    } else if (!out.ok && !out.hint) {
         out.hint = [
             "引擎有了，但没有可达的后端（下次 run 会自动拉起，见 --no-spawn）：",
             `  cd ${repo} && node tools/ext.mjs serve --port 8080`,

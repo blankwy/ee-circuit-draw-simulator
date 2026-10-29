@@ -6,7 +6,7 @@
 |---|---|---|
 | `没有可达的后端` | dev server / 静态服务都没起 | `cd 仓库 && node tools/ext.mjs dev --port 5174`；或 `build` 后 `serve --port 8080` |
 | 自动拉起 dev server 失败 | `core/ts/node_modules` 没有 vite | `npm install --prefix core/ts` |
-| `backend_unavailable` | playwright-core 找不到 / 浏览器找不到 | 设 `EXT_PW_CORE`、`EXT_CHROME`；或装 Chrome/Edge |
+| `backend_unavailable` | playwright-core 找不到 / 浏览器找不到 | 先 `node <skill>/scripts/circuitlab.mjs setup`（会补装 playwright-core）；仍不行设 `EXT_PW_CORE`、`EXT_CHROME`；或装 Chrome/Edge |
 | 端口被占 | 有旧的 dev server 在跑 | 换 `EXC_BASE`/`--base` 的端口，或停掉旧的 |
 | 改了代码但行为没变 | 复用了一个跑着旧代码的 dev server | 停掉它，让脚本自己拉起 |
 | Pages 站点连不上/连上也没用 | 探活只支持 http，https base 直接抛 `ERR_INVALID_PROTOCOL` | 本地起后端；Pages 只用于"给人点开看" |

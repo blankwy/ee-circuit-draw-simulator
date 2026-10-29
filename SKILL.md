@@ -32,7 +32,7 @@ node <skill>/scripts/circuitlab.mjs probe
 ```
 
 - `ok: true` → 有引擎、有后端，直接干活。
-- `ok: false` + `hint` 说"还没装引擎" → 装一次（克隆 ExtCircuitJS 到 `vendor/`，装依赖并构建，约 2–5 分钟）：
+- `ok: false` + `hint` 说"还没装引擎" → 装一次（克隆 ExtCircuitJS 到 `vendor/`，装依赖、无头浏览器驱动与构建，约 2–4 分钟）：
 
 ```bash
 node <skill>/scripts/circuitlab.mjs setup

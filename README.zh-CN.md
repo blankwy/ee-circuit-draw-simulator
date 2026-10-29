@@ -53,7 +53,7 @@ cd ~/ee-circuit-draw-simulator
 node scripts/circuitlab.mjs setup
 ```
 
-`setup` 会把引擎克隆到 `vendor/ExtCircuitJS`、装构建依赖、生成 `dist/`。一次性，约 2–5 分钟。
+`setup` 会把引擎克隆到 `vendor/ExtCircuitJS`、装构建依赖和无头浏览器驱动（`playwright-core`）、生成 `dist/`。一次性，约 2–4 分钟。
 已经有引擎 checkout？跳过这步，指过去即可：
 
 ```bash
