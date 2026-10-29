@@ -38,7 +38,7 @@ const HELP = `ee-circuit-draw-simulator —— 电子电路绘制仿真助手 CL
 命令:
   setup     第一次用：克隆并构建 ExtCircuitJS 引擎（一次就够）
   probe     探活后端（本地静态产物 / dev server）
-  corpus    检索 373 个内置电路语料（--search <关键词> / --list）
+  corpus    检索 367 个内置电路语料（--search <关键词> / --list）
   run       一轮完整仿真：载入 → 改参 → 步进 → 测量 → 采样 → 扫描 → 出图 → 分享
   share     生成分享链接（纯 Node，不需要浏览器）
   shot      导出电路图（svg / png）

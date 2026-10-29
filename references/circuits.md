@@ -36,7 +36,7 @@ node <skill>/scripts/circuitlab.mjs corpus --search 555
 
 ## 使用提示
 
-- 373 个语料里**只有 27 个自带示波器（scope）**，所以别指望 `read_scope` 一定有数据。
+- 373 个语料文件里（索引收录 367 个有分类的）**只有 27 个自带示波器（scope）**，所以别指望 `read_scope` 一定有数据。
   本 skill 的 `--sample` 是自己逐步测量建的时序，不依赖 scope，任意网都能画。
 - 语料里的元件 id 由引擎分配（`e1..eN`，导线也占号），**每次载入后先用 `--measure all` 看
   `circuit.elements` 再决定改哪个**，不要照抄文档里的 id。
