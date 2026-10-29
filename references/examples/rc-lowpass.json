@@ -1,0 +1,14 @@
+{
+  "schema": "netlist/0.1",
+  "components": [
+    { "id": "v1", "type": "VoltageElm", "props": { "waveform": 1, "frequency": 1000, "maxVoltage": 5, "bias": 0, "phaseShift": 0 } },
+    { "id": "r1", "type": "ResistorElm", "props": { "resistance": 1000 } },
+    { "id": "c1", "type": "CapacitorElm", "props": { "capacitance": 1e-7 } },
+    { "id": "g1", "type": "GroundElm", "props": {} }
+  ],
+  "nets": [
+    { "id": "in", "pins": ["v1:0", "r1:0"] },
+    { "id": "out", "pins": ["r1:1", "c1:0"] },
+    { "id": "gnd", "pins": ["v1:1", "c1:1", "g1:0"], "ground": true }
+  ]
+}

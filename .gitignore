@@ -1,0 +1,12 @@
+# engine checkout created by `circuitlab.mjs setup`
+vendor/
+# CLI output
+circuit-out/
+circuit.svg
+share.html
+# node
+node_modules/
+# logs / os noise
+*.log
+.DS_Store
+Thumbs.db

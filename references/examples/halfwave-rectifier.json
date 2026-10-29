@@ -1,0 +1,14 @@
+{
+  "schema": "netlist/0.1",
+  "components": [
+    { "id": "v1", "type": "VoltageElm", "props": { "waveform": 1, "frequency": 50, "maxVoltage": 10 } },
+    { "id": "d1", "type": "DiodeElm", "props": { "modelName": "default" } },
+    { "id": "r1", "type": "ResistorElm", "props": { "resistance": 1000 } },
+    { "id": "g1", "type": "GroundElm", "props": {} }
+  ],
+  "nets": [
+    { "id": "ac", "pins": ["v1:0", "d1:0"] },
+    { "id": "dc", "pins": ["d1:1", "r1:0"] },
+    { "id": "gnd", "pins": ["v1:1", "r1:1", "g1:0"], "ground": true }
+  ]
+}
