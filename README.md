@@ -61,7 +61,7 @@ npx ee-circuit-draw-simulator@latest setup     # engine → ~/.ee-circuit/ExtCir
 npx ee-circuit-draw-simulator run --circuit lrc --step 0.005 --measure all
 ```
 
-`setup` clones the engine, installs its build dependencies plus the headless-browser driver (`playwright-core`), and builds `dist/`. One time, ~2–4 minutes. With a clone the engine lands in `vendor/ExtCircuitJS`; installed from npm it goes to `~/.ee-circuit/ExtCircuitJS`, so upgrading the package never throws away a 2-minute build. Already have an engine checkout? Skip both and point at it:
+`setup` clones the engine, installs its build dependencies plus the headless-browser driver (`playwright-core`), and builds `dist/`. One time, ~2–4 minutes. With a clone the engine lands in `vendor/ExtCircuitJS`; installed from npm (0.2.1 and later) it goes to `~/.ee-circuit/ExtCircuitJS`, so upgrading the package never throws away a 2-minute build. Already have an engine checkout? Skip both and point at it:
 
 ```bash
 export EXTCIRCUIT_HOME=/path/to/ExtCircuitJS

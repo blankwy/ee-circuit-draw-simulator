@@ -64,7 +64,7 @@ npx ee-circuit-draw-simulator run --circuit lrc --step 0.005 --measure all
 ```
 
 `setup` 会克隆引擎、装构建依赖和无头浏览器驱动（`playwright-core`）、生成 `dist/`。一次性，约 2–4 分钟。
-克隆方式下引擎落在 `vendor/ExtCircuitJS`；从 npm 装时落在 `~/.ee-circuit/ExtCircuitJS`，
+克隆方式下引擎落在 `vendor/ExtCircuitJS`；从 npm 装时（0.2.1 起）落在 `~/.ee-circuit/ExtCircuitJS`，
 这样升级包版本不会连那 2 分钟的构建一起丢掉。已经有引擎 checkout？两条都跳过，指过去即可：
 
 ```bash
