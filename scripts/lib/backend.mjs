@@ -35,6 +35,21 @@ export function isEngineRepo(dir) {
     );
 }
 
+/**
+ * 引擎的 MCP 桥必须有 playwright-core，但引擎故意不把它写进依赖。
+ * 与 backend.ts 的 resolvePwCore 保持同一套查找位置：仓库根 / core/ts / EXT_PW_CORE。
+ */
+export function hasPlaywrightCore(repo) {
+    if (!repo) return false;
+    if (process.env.EXT_PW_CORE && fs.existsSync(process.env.EXT_PW_CORE)) return true;
+    for (const dir of [repo, path.join(repo, "core", "ts")]) {
+        for (const f of ["index.js", "index.mjs"]) {
+            if (fs.existsSync(path.join(dir, "node_modules", "playwright-core", f))) return true;
+        }
+    }
+    return false;
+}
+
 /** 仓库根：显式参数 → 环境变量 → 随技能克隆的 vendor/ → 同级目录 → HOME → cwd。 */
 export function resolveRepo(explicit) {
     const tried = [];

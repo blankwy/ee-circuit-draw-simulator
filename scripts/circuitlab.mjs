@@ -25,6 +25,7 @@ import {
     defaultBases,
     defaultEngineDir,
     isEngineRepo,
+    hasPlaywrightCore,
     ENGINE_URL,
     SKILL_DIR,
 } from "./lib/backend.mjs";
@@ -793,8 +794,7 @@ async function cmdSetup(o) {
 
     // 引擎不把 playwright-core 写进依赖（只跑 Node 契约的人不需要它），但 MCP 桥必须有它。
     // --no-save：装进 node_modules 而不改动引擎的 package.json。
-    const pwCore = path.join(dir, "node_modules", "playwright-core", "package.json");
-    const pwReady = fs.existsSync(pwCore) || Boolean(process.env.EXT_PW_CORE);
+    const pwReady = hasPlaywrightCore(dir);
     if (!o["skip-install"] && !pwReady) {
         runStep("npm", ["install", "--no-save", "--no-audit", "--no-fund", "playwright-core"], dir, "安装 playwright-core（无头浏览器驱动）");
         steps.push({ step: "playwright-core", status: "ok" });
@@ -829,10 +829,9 @@ async function cmdProbe(o) {
         pages: "https://blankwy.github.io/ExtCircuitJS/circuitjs.html —— 只能给人点开看，MCP 无法驱动（backend 探活只认 http）",
     };
     if (repo) {
-        const pwCore = path.join(repo, "node_modules", "playwright-core", "package.json");
         out.capabilities = {
             dist: fs.existsSync(path.join(repo, "dist", "circuitjs.html")),
-            playwrightCore: fs.existsSync(pwCore) || Boolean(process.env.EXT_PW_CORE),
+            playwrightCore: hasPlaywrightCore(repo),
         };
         if (!out.capabilities.playwrightCore) {
             out.hint = ["缺 playwright-core（无头浏览器驱动），补一次就好：", `  cd ${repo} && npm install --no-save playwright-core`];
