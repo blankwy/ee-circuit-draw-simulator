@@ -218,6 +218,7 @@ ee-circuit-draw-simulator/
 - 链接只承载电路本身，不含仿真状态（对方从 t=0 开始）。
 - 单文件离线 HTML（`ext bundle-single`）没有内置电路列表与中文语言包（`file://` 的 CORS 限制），仿真本身正常。
 - 引擎是 GPL-2.0-or-later；本技能沿用同一许可，不打包引擎代码。
+- `references/` 下的深水区文档是中文（作者的一手实验笔记）；`SKILL.md`、`AGENTS.md` 与英文 README 为英文。
 
 ## 致谢
 

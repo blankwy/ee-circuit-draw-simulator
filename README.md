@@ -209,6 +209,7 @@ ee-circuit-draw-simulator/
 - Share links carry the circuit, not simulation state — the recipient starts at t=0.
 - Offline single-file HTML (`ext bundle-single`) has no circuit library and no Chinese language pack (CORS on `file://`); simulation itself works.
 - The engine is GPL-2.0-or-later; this skill keeps the same licence and does not bundle engine code.
+- Deep-reference files under `references/` are written in Chinese (they carry the author's lab notes); `SKILL.md`, `AGENTS.md` and this README are in English.
 
 ## Credits
 
