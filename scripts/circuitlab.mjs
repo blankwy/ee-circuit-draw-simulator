@@ -26,6 +26,7 @@ import {
     defaultEngineDir,
     isEngineRepo,
     hasPlaywrightCore,
+    SKILL_IN_NODE_MODULES,
     ENGINE_URL,
     SKILL_DIR,
 } from "./lib/backend.mjs";
@@ -34,7 +35,8 @@ import { parseValue, fmtEng, round } from "./lib/units.mjs";
 
 const HELP = `ee-circuit-draw-simulator —— 电子电路绘制仿真助手 CLI
 
-用法: node circuitlab.mjs <命令> [选项]
+用法: ee-circuit-draw-simulator <命令> [选项]
+      （等价写法：npx ee-circuit-draw-simulator ... / node scripts/circuitlab.mjs ...）
 
 命令:
   setup     第一次用：克隆并构建 ExtCircuitJS 引擎（一次就够）
@@ -51,7 +53,8 @@ const HELP = `ee-circuit-draw-simulator —— 电子电路绘制仿真助手 CL
   --out <dir>       产物目录（默认 ./circuit-out）
 
 setup 的选项:
-  --dir <path>      引擎装到哪（默认 <skill>/vendor/ExtCircuitJS）
+  --dir <path>      引擎装到哪（默认 <skill>/vendor/ExtCircuitJS；
+                    npx / 全局安装时默认 ~/.ee-circuit/ExtCircuitJS）
   --url <git url>   换一个 fork（默认 ${ENGINE_URL}）
   --skip-install    跳过 core install
   --skip-build      跳过 build（没有 dist 就只能用 dev server）
@@ -848,9 +851,13 @@ async function cmdProbe(o) {
         }
     }
     if (!repo) {
+        const how = SKILL_IN_NODE_MODULES
+            ? "npx ee-circuit-draw-simulator setup"
+            : "node <skill>/scripts/circuitlab.mjs setup";
         out.hint = [
             "还没装引擎（ExtCircuitJS）。一条命令搞定：",
-            "  node <skill>/scripts/circuitlab.mjs setup",
+            `  ${how}`,
+            `引擎会装到：${defaultEngineDir()}`,
             `找过的位置：${tried.slice(0, 5).join(" / ")}`,
         ];
     } else if (!out.ok && !out.hint) {

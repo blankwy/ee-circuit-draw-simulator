@@ -21,9 +21,20 @@ export const SKILL_DIR = path.resolve(HERE, "../..");
 /** 官方引擎仓库。setup 命令按它克隆；也可以 --url 换成自己的 fork。 */
 export const ENGINE_URL = "https://github.com/blankwy/ExtCircuitJS.git";
 
+/**
+ * 技能目录是不是躺在某个 node_modules 里（npx / -g / 装成依赖）。
+ * 那种位置的目录会被升级、`npm cache clean`、临时安装目录回收抹掉。
+ */
+export const SKILL_IN_NODE_MODULES = /[\\/](node_modules|_npx)[\\/]/.test(`${SKILL_DIR}${path.sep}`);
+
 /** 技能自带引擎的落点（.gitignore 掉，不进本仓库）。 */
 export function defaultEngineDir() {
-    return process.env.EE_CIRCUIT_ENGINE_DIR || path.join(SKILL_DIR, "vendor", "ExtCircuitJS");
+    if (process.env.EE_CIRCUIT_ENGINE_DIR) return process.env.EE_CIRCUIT_ENGINE_DIR;
+    // 从 npm 装着跑（npx 最典型）时，包目录是临时/可回收的：引擎放到用户目录，
+    // 否则换一次版本就得重下一份引擎、重构建两分钟。
+    return SKILL_IN_NODE_MODULES
+        ? path.join(os.homedir(), ".ee-circuit", "ExtCircuitJS")
+        : path.join(SKILL_DIR, "vendor", "ExtCircuitJS");
 }
 
 /** 判断一个目录是不是 ExtCircuitJS 仓库根。 */

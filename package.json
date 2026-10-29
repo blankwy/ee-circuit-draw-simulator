@@ -1,6 +1,6 @@
 {
   "name": "ee-circuit-draw-simulator",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Agent skill for real circuit simulation: draw, simulate, measure, plot and share circuits instead of guessing numbers.",
   "type": "module",
   "license": "GPL-2.0-or-later",

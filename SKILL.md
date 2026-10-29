@@ -9,7 +9,7 @@ allowed-tools:
   - Glob
   - Grep
 metadata:
-  version: 0.2.0
+  version: 0.2.1
   homepage: https://github.com/blankwy/ee-circuit-draw-simulator
   engine: ExtCircuitJS (CircuitJS1 fork; real nodal-analysis simulator driven headlessly over an MCP bridge)
   trigger: 电路仿真、波形、元件参数、滤波器/振荡器/放大器、生成电路图、分享可交互电路
@@ -24,6 +24,8 @@ metadata:
 采样 → 参数扫描 → 出 SVG → 出分享链接」全链路，一次进程跑完，stdout 只有 JSON。
 
 > 回答用用户的语言；数值、单位、元件名照 CLI 输出原样引用。
+> 本文件里写作 `node <skill>/scripts/circuitlab.mjs`；如果手上只有 npm 包没有技能目录，
+> 换成 `npx ee-circuit-draw-simulator`，参数完全一样。
 
 ## 一、先决条件（按顺序做，别跳）
 

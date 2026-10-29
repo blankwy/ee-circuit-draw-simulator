@@ -15,6 +15,7 @@
 
 - 引擎：[ExtCircuitJS](https://github.com/blankwy/ExtCircuitJS)（CircuitJS1 二开，JSON 网表层 + MCP 桥，GPL-2.0-or-later）
 - 技能本体：纯 Node ≥ 22，零运行时依赖，一个 CLI，stdout 只出 JSON
+- CLI 也发在 npm：[`ee-circuit-draw-simulator`](https://www.npmjs.com/package/ee-circuit-draw-simulator)
 - 任何会读 `SKILL.md` 的助手都能用（Claude Code、Codex CLI、DeepSeek Harness、WorkBuddy…）
 
 ## 它能回答什么
@@ -47,14 +48,24 @@
 
 ### 1. 拿到技能和它的引擎
 
+**当技能装（推荐）。** 助手要靠磁盘上的文件读 `SKILL.md`，所以克隆下来：
+
 ```bash
 git clone https://github.com/blankwy/ee-circuit-draw-simulator.git ~/ee-circuit-draw-simulator
 cd ~/ee-circuit-draw-simulator
 node scripts/circuitlab.mjs setup
 ```
 
-`setup` 会把引擎克隆到 `vendor/ExtCircuitJS`、装构建依赖和无头浏览器驱动（`playwright-core`）、生成 `dist/`。一次性，约 2–4 分钟。
-已经有引擎 checkout？跳过这步，指过去即可：
+**当纯 CLI 用。** 也发在 npm 上了，不用克隆，适合脚本和 CI：
+
+```bash
+npx ee-circuit-draw-simulator@latest setup     # 引擎装到 ~/.ee-circuit/ExtCircuitJS
+npx ee-circuit-draw-simulator run --circuit lrc --step 0.005 --measure all
+```
+
+`setup` 会克隆引擎、装构建依赖和无头浏览器驱动（`playwright-core`）、生成 `dist/`。一次性，约 2–4 分钟。
+克隆方式下引擎落在 `vendor/ExtCircuitJS`；从 npm 装时落在 `~/.ee-circuit/ExtCircuitJS`，
+这样升级包版本不会连那 2 分钟的构建一起丢掉。已经有引擎 checkout？两条都跳过，指过去即可：
 
 ```bash
 export EXTCIRCUIT_HOME=/path/to/ExtCircuitJS

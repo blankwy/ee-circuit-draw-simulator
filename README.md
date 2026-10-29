@@ -13,6 +13,7 @@ Numbers come from the engine, never from a formula the model recalled. Every val
 
 - Engine: [ExtCircuitJS](https://github.com/blankwy/ExtCircuitJS) — a CircuitJS1 fork with a JSON netlist layer and an MCP bridge, GPL-2.0-or-later
 - Skill: pure Node ≥ 22, no runtime dependencies, one CLI, JSON on stdout
+- CLI on npm: [`ee-circuit-draw-simulator`](https://www.npmjs.com/package/ee-circuit-draw-simulator)
 - Works with any agent that reads `SKILL.md` (Claude Code, Codex CLI, DeepSeek Harness, WorkBuddy, …)
 
 ## What it answers
@@ -45,13 +46,22 @@ Measured examples (reproducible with the commands below):
 
 ### 1. Get the skill and its engine
 
+**As an agent skill (recommended).** The agent needs the files on disk to read `SKILL.md`, so clone:
+
 ```bash
 git clone https://github.com/blankwy/ee-circuit-draw-simulator.git ~/ee-circuit-draw-simulator
 cd ~/ee-circuit-draw-simulator
 node scripts/circuitlab.mjs setup
 ```
 
-`setup` clones the engine into `vendor/ExtCircuitJS`, installs its build dependencies plus the headless-browser driver (`playwright-core`), and builds `dist/`. One time, ~2–4 minutes. Already have an engine checkout? Skip this and point at it:
+**As a plain CLI.** Also published on npm — no clone, good for scripts and CI:
+
+```bash
+npx ee-circuit-draw-simulator@latest setup     # engine → ~/.ee-circuit/ExtCircuitJS
+npx ee-circuit-draw-simulator run --circuit lrc --step 0.005 --measure all
+```
+
+`setup` clones the engine, installs its build dependencies plus the headless-browser driver (`playwright-core`), and builds `dist/`. One time, ~2–4 minutes. With a clone the engine lands in `vendor/ExtCircuitJS`; installed from npm it goes to `~/.ee-circuit/ExtCircuitJS`, so upgrading the package never throws away a 2-minute build. Already have an engine checkout? Skip both and point at it:
 
 ```bash
 export EXTCIRCUIT_HOME=/path/to/ExtCircuitJS
