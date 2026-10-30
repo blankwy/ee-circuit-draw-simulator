@@ -38,6 +38,8 @@
 | 参数改了 `applied: 0` | 字段名写错（`capacitor` vs `capacitance`） | 看 `circuit.elements[].props` 的真实键名 |
 | 网表载入了但网名对不上 | 引擎把自定义网名改成 `n0/n1…` | 看 `circuit.nets[].pins` 判拓扑 |
 | 导线一堆、元件 id 跳号 | 自动布线生成的 `WireElm` 也占 id | 正常现象；`circuit.elements` 已滤掉导线 |
+| `--jobs` 整批在启动前就失败 | 某个作业的电路来源解析不出来（语料名写错 / 文件不存在）——这是故意的：省掉一次浏览器启动 | 修好那个作业；作业之间的仿真失败才是逐个隔离的 |
+| `--jobs` 里某个作业 `ok:false` 但整体还有结果 | 单个作业失败不拖垮整批，整体 `ok` 也是 false（退出码 2） | 看 `jobs[].error`；其余作业的 `artifacts[]` 仍然可用 |
 
 ## 分享与产物
 

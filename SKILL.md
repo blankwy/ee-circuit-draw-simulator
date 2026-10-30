@@ -184,6 +184,26 @@ node <skill>/scripts/circuitlab.mjs run --circuit 555square \
   --svg --png --shot out/555.png
 ```
 
+### 多个电路要比对时，用 `--jobs` 一个进程跑完
+
+固定成本是**每次进程** 4.5 s（node 启动 + 后端握手 + 载入），作业本身只加 1 s 量级。
+所以"三个电路各画一张图"应该一次调用做完，不是三次：
+
+```bash
+cat > jobs.json <<'EOF'
+[{"name":"rc","netlist":"rc-lowpass.json","sample":"all","span":0.02,"svg":true,"png":true},
+ {"name":"分压","netlist":"divider.json","step":"0.001","measure":"all"},
+ {"name":"555","circuit":"555square","sample":"n2","span":0.6,"settle":0.2,"png":true,"shot":"555.png"}]
+EOF
+node <skill>/scripts/circuitlab.mjs run --jobs @jobs.json --out out
+```
+
+- 每项就是一套 `run` 选项；顶层选项（`--png`、`--out`、`--span`…）当默认值，作业里同名键覆盖它。
+- 产物分到 `out/<作业名>/` 子目录，顶层 `artifacts[]` 一次给全（带 `job` 字段）。
+- **单个作业失败不拖垮整批**：`jobs[].ok=false` 那条给 `error`，其余结果照常有效，
+  但整体 `ok` 为 false（退出码 2），别忽略。
+- 实测：3 个作业一次进程 7.1 s；同样的三件事分开跑 16.3 s。
+
 ## 六、排障
 
 | 现象 | 处理 |

@@ -13,6 +13,8 @@
 // 前置：引擎已 setup、本机有 Chrome/Edge。CI 里跑不了（太重），本地/发布前跑。
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -113,6 +115,30 @@ step("拓扑闸：C/E 短接应报错");
     const j = run(["run", "--netlist", path.join(HERE, "..", "references", "examples", "shorted-transistor.json"), "--measure", "all"]);
     const blocked = j.ok === false && /拓扑错误/.test(j.error?.message ?? "");
     CASES.push({ name: "短接三极管被拦下", got: blocked ? 1 : 0, want: 1, tol: 0, unit: "", ok: blocked });
+}
+
+// 7) 批处理：一个进程跑两个作业。既要证明"好作业照旧出数"（= 抽 executeJob 没改坏），
+//    也要证明"坏作业被隔离"（一个短接三极管不该把整批拖垮）。
+step("--jobs：一进程多作业 + 单作业失败隔离");
+{
+    const jobsFile = path.join(os.tmpdir(), `ee-smoke-jobs-${process.pid}.json`);
+    fs.writeFileSync(jobsFile, JSON.stringify([
+        { name: "divider", netlist: path.join(HERE, "..", "references", "examples", "divider.json"), step: "0.001", measure: "all" },
+        { name: "shorted", netlist: path.join(HERE, "..", "references", "examples", "shorted-transistor.json"), measure: "all" },
+    ]), "utf8");
+    const j = run(["run", "--jobs", "@" + jobsFile]);
+    fs.unlinkSync(jobsFile);
+    const first = j.jobs?.[0];
+    const second = j.jobs?.[1];
+    CASES.push({
+        name: "批处理：好作业仍成功", got: first?.ok ? 1 : 0, want: 1, tol: 0, unit: "",
+        ok: first?.ok === true,
+    });
+    const isolated = second?.ok === false && /拓扑错误/.test(second?.error?.message ?? "");
+    CASES.push({ name: "批处理：坏作业被隔离", got: isolated ? 1 : 0, want: 1, tol: 0, unit: "", ok: isolated });
+    const tap = (first?.circuit?.nets ?? []).find((n) => (n.pins ?? []).includes("e2:1") && (n.pins ?? []).includes("e3:0"));
+    const raw = tap ? first.measurements?.values?.[tap.id] : undefined;
+    check("批处理：分压点 (|V|)", { got: Math.abs(raw), want: 6, tol: 0.05 });
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

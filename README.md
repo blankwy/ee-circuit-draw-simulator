@@ -191,8 +191,24 @@ Key flags:
 | `--svg` `--png` | Vector plot, plus a raster copy for humans (headless Chrome/Edge, `--scale` 2× by default) |
 | `--shot` `--share` `--dump` | Schematic (.png/.svg by extension), share URL, circuit text |
 | `--force` | Skip the topology gate — only when a shorted device is intentional |
+| `--jobs <json\|@file>` | Run several jobs in one process (they share the backend). Top-level flags are defaults; each job gets its own `--out` subdirectory |
 
 Every file the run produces is listed in `artifacts[]` with an absolute path, so an agent never has to guess where `--out` put things.
+
+### Batching
+
+Attach cost is fixed per process — roughly 4.5 s of node boot, backend handshake and circuit load — while the work itself adds about a second. So "three circuits, three pictures" belongs in one invocation:
+
+```bash
+cat > jobs.json <<'EOF'
+[{"name":"rc","netlist":"rc-lowpass.json","sample":"all","span":0.02,"svg":true,"png":true},
+ {"name":"divider","netlist":"divider.json","step":"0.001","measure":"all"},
+ {"name":"555","circuit":"555square","sample":"n2","span":0.6,"settle":0.2,"shot":"555.png"}]
+EOF
+node $CLI run --jobs @jobs.json --out out
+```
+
+Measured: those three jobs take **7.1 s** in one process versus **16.3 s** as three separate runs. A failing job does not sink the batch — it comes back as `jobs[].ok:false` with its own `error`, the rest still report results, and the overall `ok` is false so nothing is silently lost.
 
 ## Layout
 

@@ -27,6 +27,10 @@ simulation.
    MOSFET D/S) pair is not on the same net. Do not `--force` past it unless the short is the point.
 7. **Deliver PNG for humans** (`--png`, `--shot x.png`). Do not read an inline SVG back: it is one
    very long line, and line-based readers truncate it.
+8. **Batch multi-part work into one process.** Attach costs ~4.5 s per process; the work itself adds
+   ~1 s. `run --jobs @jobs.json` executes several jobs (different circuits, different outputs) against
+   one backend — 7.1 s for three jobs versus 16.3 s as three runs. One job failing leaves the others
+   intact and sets the overall `ok` to false; never drop that silently.
 
 ## First run
 

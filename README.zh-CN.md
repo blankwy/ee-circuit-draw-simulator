@@ -201,8 +201,26 @@ node $CLI shot --circuit lrc --out lrc.png
 | `--svg` `--png` | 矢量波形图，外加一份给人看的 PNG（无头 Chrome/Edge 栅格化，`--scale` 默认 2×） |
 | `--shot` `--share` `--dump` | 电路图（按扩展名给 .png/.svg）、分享链接、电路文本 |
 | `--force` | 跳过拓扑闸——只在故意短路时才用 |
+| `--jobs <json\|@文件>` | 一个进程跑多个作业（共用一个后端）。顶层参数当默认值，每个作业有自己的 `--out` 子目录 |
 
 运行产出的每个文件都在 `artifacts[]` 里带绝对路径，agent 不用猜 `--out` 把东西放哪了。
+
+### 批处理
+
+接入成本是**每次进程**固定的：node 启动 + 后端握手 + 载入，约 4.5 s；作业本身只加 1 s 量级。
+所以"三个电路各画一张图"应该一次调用做完：
+
+```bash
+cat > jobs.json <<'EOF'
+[{"name":"rc","netlist":"rc-lowpass.json","sample":"all","span":0.02,"svg":true,"png":true},
+ {"name":"分压","netlist":"divider.json","step":"0.001","measure":"all"},
+ {"name":"555","circuit":"555square","sample":"n2","span":0.6,"settle":0.2,"shot":"555.png"}]
+EOF
+node $CLI run --jobs @jobs.json --out out
+```
+
+实测：这三个作业一个进程 **7.1 s**，分成三次跑 **16.3 s**。某个作业失败不会拖垮整批——
+它单独返回 `jobs[].ok:false` 和自己的 `error`，其余作业照常出结果，但整体 `ok` 为 false，不会被悄悄吞掉。
 
 ## 目录
 

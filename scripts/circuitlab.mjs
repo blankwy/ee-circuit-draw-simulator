@@ -89,6 +89,12 @@ run 的选项:
   --force           拓扑闸拦下时强行放行（结果可能无意义）
   --print-text      JSON 里附带电路文本
   --data            JSON 里附带采样原始数组（默认只给统计量）
+  --jobs <json|@f>  一次进程跑多个作业（共用后端，省掉每次 ~4.5 s 的启动开销）。
+                   每项是一套上面这些选项；顶层选项当默认值，作业里同名键覆盖它。
+                   产物按作业名分到 --out 下的子目录，顶层 artifacts[] 给出全部路径。
+                   例：--jobs @jobs.json
+                   jobs.json: [{"name":"图","circuit":"lrc","shot":"lrc.png"},
+                               {"name":"波","circuit":"lrc","sample":"all","span":0.02,"svg":true,"png":true}]
 
 产物路径统一在结果的 artifacts[] 里（绝对路径），不用去猜 --out 目录。
 `;
@@ -516,12 +522,34 @@ async function cmdRun(o) {
     const outDir = path.resolve(String(o.out ?? "circuit-out"));
     fs.mkdirSync(outDir, { recursive: true });
 
+    // 多作业：一个进程、一个后端，跑完所有作业再退出
+    if (o.jobs !== undefined) return cmdRunJobs({ repo, outDir, o });
+
     // 先把电路来源解析好：语料名写错就别去启动浏览器了
     const { text: sourceText, source } = readCircuitSource(repo, o);
     const { backend, toolset, base, via } = await attach({ repo, base: o.base, allowSpawn: o["no-spawn"] !== true, log });
-    const result = { ok: true, backend: { base, via } };
-
     try {
+        const result = { ok: true, backend: { base, via } };
+        Object.assign(result, await executeJob({ toolset, repo, outDir, o, sourceText, source }));
+        return result;
+    } finally {
+        try {
+            await backend.dispose();
+        } catch {
+            /* 清理失败不该掩盖主流程结果 */
+        }
+    }
+}
+
+/**
+ * 一个作业的全部步骤（后端已挂载之后）。返回要并进结果的字段。
+ *
+ * 抽出来是为了 --jobs：后端挂载贵（node 启动 + MCP 握手 + 载入，约 4.5 s 固定成本），
+ * 作业本身很便宜（+0.9 s 量级），所以"一个进程跑 N 个作业"比分 N 次进程快得多。
+ */
+async function executeJob({ toolset, repo, outDir, o, sourceText, source }) {
+    const result = {};
+    {
         // 1) 载入
         const loaded = await toolset.call("circuit.load_netlist", { text: sourceText });
         if (!loaded.ok) {
@@ -829,6 +857,60 @@ async function cmdRun(o) {
         }
 
         return result;
+    }
+}
+
+/**
+ * --jobs：一次进程跑多个作业。
+ *
+ *   --jobs @jobs.json      从文件读（推荐：Windows 命令行引号很痛）
+ *   --jobs '[{...}]'       内联 JSON
+ *
+ * 每个作业就是同一套 run 选项；没写的项从顶层继承（--circuit / --span / --svg / --png …）。
+ * 依据是实测成本结构：后端挂载约 4.5 s 是**每次进程**的固定开销，作业本身只加 0.9 s 量级，
+ * 所以「一个进程跑 N 个作业」远快于「N 次进程」。单个作业失败不拖垮整批。
+ */
+async function cmdRunJobs({ repo, outDir, o }) {
+    const jobs = normalizeJobs(readIfFile(String(o.jobs)));
+    if (!jobs.length) {
+        throw new CliError("--jobs 里没有作业", '给一个 JSON 数组，例：[{"circuit":"lrc","sample":"all","svg":true}]');
+    }
+
+    // 顶层选项作为默认值（jobs / out / base 之类不继承）
+    const inherited = {};
+    for (const [k, v] of Object.entries(o)) {
+        if (k === "_" || k === "jobs" || k === "out" || k === "base" || k === "repo") continue;
+        inherited[k] = v;
+    }
+
+    // 先把所有作业的电路来源解析一遍：哪个作业的语料名写错，启动浏览器之前就报出来
+    const prepared = jobs.map((job, i) => {
+        const jo = { ...inherited, ...job };
+        const name = String(jo.name ?? `job${i + 1}`);
+        delete jo.name;
+        const jobOut = path.join(outDir, safeName(name));
+        // 相对路径的产物落到该作业自己的子目录，免得多个作业的 lrc.png 互相覆盖
+        for (const key of ["shot", "dump", "share-out"]) {
+            if (typeof jo[key] === "string" && !path.isAbsolute(jo[key])) jo[key] = path.join(jobOut, jo[key]);
+        }
+        const { text, source } = readCircuitSource(repo, jo);
+        return { name, jo, jobOut, text, source };
+    });
+
+    const { backend, toolset, base, via } = await attach({ repo, base: o.base, allowSpawn: o["no-spawn"] !== true, log });
+    const out = { ok: true, backend: { base, via }, total: prepared.length, jobs: [] };
+    try {
+        for (const p of prepared) {
+            fs.mkdirSync(p.jobOut, { recursive: true });
+            const t0 = Date.now();
+            try {
+                const r = await executeJob({ toolset, repo, outDir: p.jobOut, o: p.jo, sourceText: p.text, source: p.source });
+                out.jobs.push({ name: p.name, ok: true, ms: Date.now() - t0, outDir: p.jobOut, ...r });
+            } catch (e) {
+                const err = e instanceof CliError ? e : new CliError(String(e?.message ?? e));
+                out.jobs.push({ name: p.name, ok: false, ms: Date.now() - t0, outDir: p.jobOut, error: { message: err.message, hint: err.hint ?? null } });
+            }
+        }
     } finally {
         try {
             await backend.dispose();
@@ -836,6 +918,39 @@ async function cmdRun(o) {
             /* 清理失败不该掩盖主流程结果 */
         }
     }
+
+    const bad = out.jobs.filter((j) => j.ok === false);
+    if (bad.length) {
+        out.ok = false;
+        out.error = {
+            message: `${bad.length}/${out.jobs.length} 个作业失败：${bad.map((j) => j.name).join(", ")}`,
+            hint: "逐条看 jobs[].error；其余作业的结果仍然有效",
+        };
+    }
+    // 产物汇总到顶层：agent 一次拿全路径，不用进子目录翻
+    const arts = out.jobs.flatMap((j) => (j.artifacts ?? []).map((a) => ({ job: j.name, ...a })));
+    if (arts.length) out.artifacts = arts;
+    return out;
+}
+
+/** 把 --jobs 的 JSON 归一成作业数组。 */
+function normalizeJobs(raw) {
+    let v;
+    try {
+        v = JSON.parse(raw);
+    } catch (e) {
+        throw new CliError(`--jobs 不是合法 JSON：${e.message}`, "建议写成文件再用 --jobs @jobs.json 传");
+    }
+    const clean = (arr) => arr.filter((x) => x && typeof x === "object" && !Array.isArray(x));
+    if (Array.isArray(v)) return clean(v);
+    if (v && Array.isArray(v.jobs)) return clean(v.jobs);
+    if (v && typeof v === "object") return [v];
+    return [];
+}
+
+/** 作业名 → 安全目录名。 */
+function safeName(s) {
+    return String(s).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60) || "job";
 }
 
 function sourceLabel(source) {
