@@ -6,6 +6,10 @@
 //   · 坐标轴刻度用"好看的数字"（1/2/5×10^n），不直接取极值
 //   · 输出纯 <svg> 片段，可直接贴进 markdown / HTML
 
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
 const PALETTE = ["#2563eb", "#ea580c", "#059669", "#7c3aed", "#db2777", "#0891b2"];
 const GRID = "#94a3b8";
 const TEXT = "#64748b";
@@ -183,3 +187,76 @@ function logTicks(a, b) {
 function esc(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+// ── SVG → PNG ───────────────────────────────────────────────────────────────
+//
+// 为什么自带这个：agent 要把图给用户看时，PNG 才是能直接显示/预览的东西；
+// 而 SVG 是单行文本，Read 工具逐行截断在 2000 字符，根本读不出来。
+// 不引入依赖，直接借用本机已有的 Chrome / Edge 无头模式截图。
+
+
+const BROWSERS = [
+    process.env.EXT_CHROME,
+    "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+].filter(Boolean);
+
+export function findBrowser() {
+    for (const p of BROWSERS) {
+        try {
+            if (fs.existsSync(p)) return p;
+        } catch { /* ignore */ }
+    }
+    return null;
+}
+
+/** 从 SVG 文本里读画布尺寸（renderChannels 总会写 width/height）。 */
+function sizeOf(svg) {
+    const m = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg) ?? /width="([\d.]+)"[^>]*height="([\d.]+)"/.exec(svg);
+    const w = m ? Math.round(Number(m[1])) : 680;
+    const h = m ? Math.round(Number(m[2])) : 300;
+    return { w, h };
+}
+
+/**
+ * 把 SVG 文件栅格化成本地 PNG。
+ * @returns {{ok:boolean, file?:string, bytes?:number, browser?:string, reason?:string}}
+ */
+export function rasterizeSvg(svgFile, pngFile, { scale = 2 } = {}) {
+    const browser = findBrowser();
+    if (!browser) return { ok: false, reason: "没找到 Chrome/Edge（可设 EXT_CHROME 指过去）" };
+    let svg = "";
+    try {
+        svg = fs.readFileSync(svgFile, "utf8");
+    } catch (e) {
+        return { ok: false, reason: `读不了 ${svgFile}: ${e.message}` };
+    }
+    const { w, h } = sizeOf(svg);
+    fs.mkdirSync(path.dirname(pngFile), { recursive: true });
+    const url = new URL(`file://${path.resolve(svgFile)}`).href;
+    const r = spawnSync(
+        browser,
+        [
+            "--headless=new",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            "--force-device-scale-factor=" + scale,
+            `--window-size=${w},${h}`,
+            "--default-background-color=FFFFFFFF",
+            `--screenshot=${path.resolve(pngFile)}`,
+            url,
+        ],
+        { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8", timeout: 60_000 },
+    );
+    if (!fs.existsSync(pngFile)) {
+        return { ok: false, browser, reason: (r.stderr ?? "").trim().split(/\r?\n/).slice(-3).join(" ") || "浏览器没有产出 PNG" };
+    }
+    return { ok: true, file: path.resolve(pngFile), bytes: fs.statSync(pngFile).size, browser: path.basename(browser) };
+}
+

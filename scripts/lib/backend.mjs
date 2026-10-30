@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { register } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -20,6 +20,40 @@ export const SKILL_DIR = path.resolve(HERE, "../..");
 
 /** 官方引擎仓库。setup 命令按它克隆；也可以 --url 换成自己的 fork。 */
 export const ENGINE_URL = "https://github.com/blankwy/ExtCircuitJS.git";
+
+/**
+ * 钉住的引擎版本（commit SHA，不用 HEAD）。
+ *
+ * 为什么：README 承诺"每个数字都能复现"，而 clone HEAD 意味着任何人明天装到的引擎
+ * 都可能和今天不同——数字对不上时无法解释。
+ *
+ * 这个 SHA = ExtCircuitJS origin/main @ 2026-10-30（v0.2.0 + 22 个提交），
+ * 也是 README/references 里所有实测值的来源。换它就等于换引擎，
+ * 换完必须重跑 \`node scripts/smoke.mjs\` 核对这些数字。
+ */
+export const ENGINE_REF = "bfebc8046ca3dff3c148bf6a97b412ca35b799db";
+
+/** 读引擎的 tag/commit 描述（如 v0.2.0 / v0.2.0-3-gabc1234 / abc1234）。 */
+export function engineDescribe(dir) {
+    if (!dir) return null;
+    try {
+        const r = spawnSync("git", ["-C", dir, "describe", "--tags", "--always", "--dirty"], { encoding: "utf8", timeout: 8000 });
+        return r.status === 0 ? String(r.stdout).trim() || null : null;
+    } catch {
+        return null;
+    }
+}
+
+/** 读引擎当前 commit（短哈希）。不是 git 仓库就返回 null。 */
+export function engineCommit(dir) {
+    if (!dir) return null;
+    try {
+        const r = spawnSync("git", ["-C", dir, "rev-parse", "--short", "HEAD"], { encoding: "utf8", timeout: 8000 });
+        return r.status === 0 ? String(r.stdout).trim() || null : null;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * 技能目录是不是躺在某个 node_modules 里（npx / -g / 装成依赖）。

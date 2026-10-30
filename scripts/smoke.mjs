@@ -1,0 +1,134 @@
+#!/usr/bin/env node
+// smoke.mjs —— 把 README / SKILL.md 里的实测数字重跑一遍。
+//
+// 为什么需要：这个 skill 的全部信誉建立在"每个数都由引擎产出"上。引擎一升级、
+// 模型一换，数字就可能悄悄漂移，而文档不会自己报警。这个脚本就是那道闸。
+//
+// 用法：
+//   node scripts/smoke.mjs                 # 用默认引擎（EXTCIRCUIT_HOME / vendor）
+//   node scripts/smoke.mjs --base http://127.0.0.1:8080
+//   node scripts/smoke.mjs --verbose       # 打印每次调用的完整 JSON
+//
+// 退出码：0 = 全部落在容差内；1 = 有偏差或调用失败。
+// 前置：引擎已 setup、本机有 Chrome/Edge。CI 里跑不了（太重），本地/发布前跑。
+
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CLI = path.join(HERE, "circuitlab.mjs");
+
+const argv = process.argv.slice(2);
+const verbose = argv.includes("--verbose");
+const baseIdx = argv.indexOf("--base");
+const base = baseIdx >= 0 ? argv[baseIdx + 1] : null;
+
+/** 跑一次 CLI，返回解析后的 JSON。 */
+function run(args) {
+    const full = [...args, ...(base ? ["--base", base] : [])];
+    if (verbose) process.stderr.write(`\n$ circuitlab ${full.join(" ")}\n`);
+    const r = spawnSync(process.execPath, [CLI, ...full], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+    if (verbose) process.stderr.write(r.stderr ?? "");
+    try {
+        return JSON.parse(r.stdout);
+    } catch {
+        throw new Error(`CLI 输出不是 JSON（exit ${r.status}）：\n${(r.stdout ?? "").slice(0, 400)}\n${(r.stderr ?? "").slice(-400)}`);
+    }
+}
+
+const CASES = [];
+function check(name, { got, want, tol, unit = "" }) {
+    const ok = Number.isFinite(got) && Math.abs(got - want) <= tol;
+    CASES.push({ name, got, want, tol, unit, ok });
+    return ok;
+}
+
+function step(msg) {
+    process.stderr.write(`▸ ${msg}\n`);
+}
+
+// 1) 555 方波：频率与占空比
+step("555 astable：频率 / 占空比");
+{
+    const j = run(["run", "--circuit", "555square", "--sample", "n2", "--span", "0.6", "--points", "2000", "--settle", "0.2"]);
+    if (!j.ok) throw new Error(`555 采样失败：${JSON.stringify(j.error)}`);
+    const c = j.sample.channels[0];
+    check("555 频率 (Hz)", { got: c.freqEstimate, want: 239.6, tol: 0.8 });
+    check("555 占空比", { got: c.dutyCycle, want: 0.496, tol: 0.02 });
+}
+
+// 2) 555 改 R2：同一次扫描里的三组
+step("555 astable：R2 = 10k / 22k / 47k");
+{
+    const j = run(["run", "--circuit", "555square", "--sweep", "e14.resistance=10k,22k,47k", "--probe", "n2",
+        "--settle", "0.2", "--span", "0.6", "--points", "2000"]);
+    if (!j.ok) throw new Error(`555 扫描失败：${JSON.stringify(j.error)}`);
+    const by = new Map(j.sweep.rows.map((r) => [r.x, r.nets.n2]));
+    const at = (v) => by.get(v)?.freqEstimate;
+    check("R2=10k 频率 (Hz)", { got: at(10000), want: 239.6, tol: 0.8 });
+    check("R2=22k 频率 (Hz)", { got: at(22000), want: 108.8, tol: 1.0 });
+    check("R2=47k 频率 (Hz)", { got: at(47000), want: 50.8, tol: 0.6 });
+}
+
+// 3) RC 低通：1.6 kHz 处应为 0.707× 通带
+step("RC 低通：−3 dB 点");
+{
+    const j = run(["run", "--netlist", path.join(HERE, "..", "references", "examples", "rc-lowpass.json"),
+        "--sweep", "e1.frequency=100,1600,6400", "--probe", "n1", "--settle", "0.02", "--span", "0.02", "--points", "100"]);
+    if (!j.ok) throw new Error(`RC 扫描失败：${JSON.stringify(j.error)}`);
+    const by = new Map(j.sweep.rows.map((r) => [r.x, r.nets.n1.vpp]));
+    const pass = by.get(100);
+    const atCut = by.get(1600);
+    check("RC 100 Hz Vpp (V)", { got: pass, want: 9.98, tol: 0.1 });
+    check("RC 1.6 kHz Vpp (V)", { got: atCut, want: 7.05, tol: 0.15 });
+    check("RC 1.6 kHz / 100 Hz 比值", { got: pass ? atCut / pass : NaN, want: 0.7071, tol: 0.02 });
+}
+
+// 4) 分压器：9 V、1k/2k → 6 V（符号取决于接线顺序，取绝对值比）
+step("分压器 9 V / 1k / 2k");
+{
+    const j = run(["run", "--netlist", path.join(HERE, "..", "references", "examples", "divider.json"), "--step", "0.001", "--measure", "all"]);
+    if (!j.ok) throw new Error(`分压失败：${JSON.stringify(j.error)}`);
+    // 别用"所有节点里最大的那个"——那是源节点（9 V）。分压点 = 接在 r1 的 1 脚与 r2 的 0 脚之间的网。
+    const tap = (j.circuit.nets ?? []).find((n) => (n.pins ?? []).includes("e2:1") && (n.pins ?? []).includes("e3:0"));
+    const raw = tap ? j.measurements.values[tap.id] : undefined;
+    check("分压点输出 (|V|)", { got: Math.abs(raw), want: 6, tol: 0.05 });
+}
+
+// 5) 运放：增益 3（1 V 输入 → 3.00 V），用 --set 把 5 V 源降到 1 V 免得削顶
+step("运放同相放大：增益 3");
+{
+    const j = run(["run", "--circuit", "amp-noninvert", "--set", "e1.maxVoltage=1", "--sample", "n2",
+        "--span", "0.25", "--points", "400"]);
+    if (!j.ok) throw new Error(`运放采样失败：${JSON.stringify(j.error)}`);
+    const c = j.sample.channels[0];
+    const gain = (c.max - c.min) / 2; // 输入 1 V 峰值 → 输出峰值 = 增益
+    check("运放输出峰值 (V)", { got: gain, want: 3.0, tol: 0.08 });
+}
+
+// 6) 拓扑闸：短接的三极管必须被拦下
+step("拓扑闸：C/E 短接应报错");
+{
+    const j = run(["run", "--netlist", path.join(HERE, "..", "references", "examples", "shorted-transistor.json"), "--measure", "all"]);
+    const blocked = j.ok === false && /拓扑错误/.test(j.error?.message ?? "");
+    CASES.push({ name: "短接三极管被拦下", got: blocked ? 1 : 0, want: 1, tol: 0, unit: "", ok: blocked });
+}
+
+// ── 汇总 ────────────────────────────────────────────────────────────────────
+
+const failed = CASES.filter((c) => !c.ok);
+const pad = (s, n) => String(s).padEnd(n);
+process.stdout.write("\n");
+process.stdout.write(`${pad("检查项", 26)} ${pad("实测", 10)} ${pad("期望", 10)} ${pad("容差", 8)} 结果\n`);
+process.stdout.write(`${"-".repeat(70)}\n`);
+for (const c of CASES) {
+    const fmt = (v) => (Number.isFinite(v) ? Number(v.toFixed(4)) : "—");
+    process.stdout.write(`${pad(c.name, 26)} ${pad(fmt(c.got), 10)} ${pad(fmt(c.want), 10)} ${pad("±" + c.tol, 8)} ${c.ok ? "ok" : "FAIL"}\n`);
+}
+process.stdout.write(`${"-".repeat(70)}\n`);
+process.stdout.write(failed.length === 0
+    ? `全部 ${CASES.length} 项通过。\n`
+    : `${failed.length}/${CASES.length} 项失败：${failed.map((c) => c.name).join(", ")}\n`);
+
+process.exit(failed.length === 0 ? 0 : 1);

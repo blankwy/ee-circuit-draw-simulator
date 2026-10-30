@@ -52,7 +52,7 @@ for (const doc of docs) {
 }
 
 // ── CLI parses ─────────────────────────────────────────────────────────────
-for (const rel of ["scripts/circuitlab.mjs", "scripts/lib/backend.mjs", "scripts/lib/svg.mjs", "scripts/lib/units.mjs"]) {
+for (const rel of ["scripts/circuitlab.mjs", "scripts/lib/backend.mjs", "scripts/lib/svg.mjs", "scripts/lib/units.mjs", "scripts/smoke.mjs"]) {
     try {
         execFileSync(process.execPath, ["--check", path.join(root, rel)], { stdio: "pipe" });
     } catch (e) {

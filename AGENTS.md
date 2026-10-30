@@ -23,6 +23,10 @@ simulation.
    `references/netlist.md`) or modify built-in circuits with `--set`.
 5. **Multi-terminal parts** (op-amp, 555, transistors) belong to built-in circuits plus `--set`;
    auto-routing a hand-written netlist with them can stall the solver.
+6. **A `拓扑错误` is a real error.** The CLI checks, before simulating, that a transistor C/E (or
+   MOSFET D/S) pair is not on the same net. Do not `--force` past it unless the short is the point.
+7. **Deliver PNG for humans** (`--png`, `--shot x.png`). Do not read an inline SVG back: it is one
+   very long line, and line-based readers truncate it.
 
 ## First run
 
@@ -40,6 +44,7 @@ static server, so there is no daemon to manage.
 |---|---|
 | `SKILL.md` | skill entry: preconditions, delivery shapes, workflow, hard rules |
 | `scripts/circuitlab.mjs` | the CLI (`setup` / `probe` / `corpus` / `run` / `share` / `shot`) |
+| `scripts/smoke.mjs` | re-derives the documented numbers; run before publishing |
 | `scripts/lib/` | engine discovery, SVG rendering, engineering-unit parsing |
 | `references/` | netlist schema, corpus index, MCP tool map, troubleshooting |
 | `vendor/` | gitignored engine checkout created by `setup` |

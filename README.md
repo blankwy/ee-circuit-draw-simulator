@@ -21,7 +21,7 @@ Numbers come from the engine, never from a formula the model recalled. Every val
 | Ask | You get |
 |---|---|
 | "What's the cutoff of this RC filter?" | Swept frequency response, −3 dB point from measured Vpp |
-| "What frequency does this 555 run at?" | Measured 239.5 Hz, duty 49.6% (window t=0.2–0.8 s) |
+| "What frequency does this 555 run at?" | Measured 239.6 Hz, duty 49.6% (window t=0.2–0.8 s) |
 | "What happens if R2 becomes 22 kΩ?" | Same run, both circuits, comparable numbers |
 | "Show me the waveform / the schematic" | Inline SVG, axes and legend included |
 | "I want to play with it" | Share URL — the circuit opens in the simulator, sliders live |
@@ -32,7 +32,7 @@ Measured examples (reproducible with the commands below):
 | Circuit | Result |
 |---|---|
 | RC low-pass, R=1 kΩ, C=100 nF | Vpp 9.98 → 2.40 V across 100 Hz–6.4 kHz; 0.707× at 1.6 kHz (theory 1591 Hz) |
-| 555 astable, R2 = 10 k / 22 k / 47 k | 239.5 Hz / 108.8 Hz / 50.8 Hz, duty 48–50% |
+| 555 astable, R2 = 10 k / 22 k / 47 k | 239.6 Hz / 108.8 Hz / 50.8 Hz, duty 48–50% |
 | Op-amp non-inverting, R2/R1 = 2 k/1 k | Gain 3: 1 V in → 3.00 V out; the stock 5 V source clips at the ±15 V rail |
 | Divider 9 V, 1 k/2 k | 6 V at the tap |
 
@@ -156,8 +156,9 @@ node $CLI corpus --search 555
 # one full round: load → measure
 node $CLI run --circuit lrc --measure all
 
-# waveform: 0.6 s of a 240 Hz square wave, SVG out
-node $CLI run --circuit 555square --sample n2 --span 0.6 --points 2000 --settle 0.2 --svg
+# waveform + schematic in ONE call: 0.6 s of a 240 Hz square wave, PNG for people
+node $CLI run --circuit 555square --sample n2 --span 0.6 --points 2000 --settle 0.2 \
+  --svg --png --shot out/555.png
 
 # parameter sweep: same run, three values, comparable
 node $CLI run --circuit 555square --sweep e14.resistance=10k,22k,47k \
@@ -171,8 +172,8 @@ node $CLI run --netlist ~/ee-circuit-draw-simulator/references/examples/rc-lowpa
 # share link — no browser needed
 node $CLI share --circuit lrc
 
-# schematic export
-node $CLI shot --circuit lrc --out lrc.svg
+# schematic only (.png for people, .svg for archives)
+node $CLI shot --circuit lrc --out lrc.png
 ```
 
 `stdout` is always one JSON object; diagnostics go to `stderr`. That is deliberate: an agent can pipe the result straight into its reasoning without parsing prose.
@@ -187,7 +188,11 @@ Key flags:
 | `--measure all \| n1,n2` / `--components` | Instantaneous node voltages / element currents |
 | `--sample` `--span` `--points` `--settle` | Time-domain sampling, independent of the engine's scope buffer |
 | `--sweep <ref>=v1,v2,…` `--probe` `--logx` | Parameter sweep, one row per value |
-| `--svg` `--shot` `--share` `--dump` | SVG plot, schematic, share URL, circuit text |
+| `--svg` `--png` | Vector plot, plus a raster copy for humans (headless Chrome/Edge, `--scale` 2× by default) |
+| `--shot` `--share` `--dump` | Schematic (.png/.svg by extension), share URL, circuit text |
+| `--force` | Skip the topology gate — only when a shorted device is intentional |
+
+Every file the run produces is listed in `artifacts[]` with an absolute path, so an agent never has to guess where `--out` put things.
 
 ## Layout
 
@@ -212,6 +217,20 @@ ee-circuit-draw-simulator/
 3. No hand-written coordinates: hand-written XML that is 1 px off is a silent open circuit.
 4. Multi-terminal parts (op-amp, 555, transistors) use built-in circuits plus `--set`; auto-routing a hand-written netlist with those can stall the solver, and the CLI reports it.
 5. Sparse sampling is reported, not hidden: `resolutionWarning` means "raise `--points` and rerun".
+6. **A shorted device fails before it simulates.** If a transistor's collector and emitter — or a MOSFET's drain and source — end up on the same net, the CLI raises `拓扑错误` and stops. The alternative is a plausible-looking run that reports 0 V everywhere.
+7. **Pictures are PNG.** `--png` and `--shot x.png` rasterize through headless Chrome/Edge, because an inline SVG is a single 9 KB line that a line-based reader cannot read back.
+
+## Reproducibility
+
+- `setup` checks out a **pinned engine commit**, not `HEAD` — otherwise "these numbers are reproducible" expires as soon as the engine moves. Override with `setup --ref <sha|tag|branch>`.
+- `probe` echoes `engine.commit` / `engine.describe`, and warns when your checkout is not the pinned one.
+- `npm run smoke` re-derives the numbers in this README — 555 frequency and duty, the RC −3 dB point, the divider, op-amp gain, and the topology gate — and fails on drift:
+
+```bash
+npm run smoke
+# 555 频率 239.6 Hz ±0.8 | 占空比 0.496 ±0.02 | R2=22k 108.8 Hz ±1 | …
+# 全部 11 项通过。
+```
 
 ## Limitations
 

@@ -26,11 +26,14 @@ import {
     defaultEngineDir,
     isEngineRepo,
     hasPlaywrightCore,
+    engineCommit,
+    engineDescribe,
     SKILL_IN_NODE_MODULES,
     ENGINE_URL,
+    ENGINE_REF,
     SKILL_DIR,
 } from "./lib/backend.mjs";
-import { renderChannels } from "./lib/svg.mjs";
+import { renderChannels, rasterizeSvg } from "./lib/svg.mjs";
 import { parseValue, fmtEng, round } from "./lib/units.mjs";
 
 const HELP = `ee-circuit-draw-simulator —— 电子电路绘制仿真助手 CLI
@@ -66,7 +69,7 @@ run 的选项:
   --netlist <json|@f>  网表 JSON（自动布局，见 references/netlist.md）
   --set <ref=val>   改参数，可重复：--set e1.resistance=4.7k --set R#1.resistance=1k
   --reset           改参后复位到 t=0
-  --step <秒>       确定性推进（必须用 step，不用 run）
+  --step <秒>       确定性推进（必须用 step，不用 run；缺省时 --measure 会自动推进 1 ms）
   --measure <nets>  读瞬时值：all 或 n1,n2
   --components <ids>  读元件电流：all 或 e1,e2
   --sample <nets>   采样时域波形：all 或 n1,n2
@@ -77,12 +80,17 @@ run 的选项:
   --probe <nets>    扫描时观测的网络
   --logx            扫描图横轴取对数
   --svg             为采样/扫描生成 SVG（写到 --out）
+  --png             同时把 SVG 栅格化成 PNG（给用户看图用；需本机 Chrome/Edge）
+  --scale <n>       PNG 缩放倍数（默认 2）
   --dump <file>     导出电路文本
   --share           生成分享链接（先 dump 再压缩）
   --share-out <f>   同时生成 1–2KB 分享页
-  --shot <file>     导出电路图（.svg 或 .png）
+  --shot <file>     导出电路图（.svg 或 .png，看扩展名）
+  --force           拓扑闸拦下时强行放行（结果可能无意义）
   --print-text      JSON 里附带电路文本
   --data            JSON 里附带采样原始数组（默认只给统计量）
+
+产物路径统一在结果的 artifacts[] 里（绝对路径），不用去猜 --out 目录。
 `;
 
 // ── 参数解析 ────────────────────────────────────────────────────────────────
@@ -171,6 +179,89 @@ async function advance(toolset, seconds, { maxChunks = 400 } = {}) {
 function warn(result, msg) {
     if (!result.warnings) result.warnings = [];
     if (!result.warnings.includes(msg)) result.warnings.push(msg);
+}
+
+/** 产物路径集中登记：agent 不用再去 \`circuit-out/\` 里 find。 */
+function addArtifact(result, kind, file) {
+    if (!result.artifacts) result.artifacts = [];
+    const abs = path.resolve(file);
+    if (result.artifacts.some((a) => a.path === abs)) return;
+    result.artifacts.push({ kind, path: abs, bytes: fs.existsSync(abs) ? fs.statSync(abs).size : undefined });
+}
+
+/** 读数全是 0（或压根没值）——用于判断"要不要自动推进再读"。 */
+function allNearlyZero(values) {
+    const vs = Object.values(values ?? {});
+    return vs.length === 0 || vs.every((v) => Math.abs(Number(v)) < 1e-9);
+}
+
+// ── 拓扑闸：载入后、仿真前自己查一遍 ─────────────────────────────────────────
+//
+// 为什么需要：`packages/netlist` 的自动布线在多端元件上偶尔会把两个功率脚并进
+// 同一个网（已验证：三极管的 C 与 E 同网）。引擎不报错，只会 engineSteps=0、读数
+// 全 0，看起来像"你电路画错了"。这类错误纯图论就能判，不必等仿真跑完才发现。
+//
+// 引脚语义取自引擎源码（core/ts/*.ts 的节点注释）：
+//   TransistorElm  node0 = base，node1 = collector，node2 = emitter
+//   MosfetElm      node0 = gate，node1 / node2 = source / drain（源漏可互换）
+const PIN_SEMANTICS = {
+    TransistorElm: { 1: "集电极 C", 2: "发射极 E" },
+    MosfetElm: { 1: "漏极 D", 2: "源极 S" },
+};
+
+/**
+ * 只查"短接即失去意义"的引脚对（C-E / D-S），不查 555、电位器这类
+ * 允许多脚同网的元件——那些接法在真实电路里是合法的，查了只会误报。
+ */
+function lintTopology(elements, nets) {
+    if (!elements?.length || !nets?.length) return { fatal: [], checked: 0 };
+    const netOf = new Map();
+    for (const n of nets) for (const p of n.pins ?? []) netOf.set(String(p), n.id);
+
+    const fatal = [];
+    let checked = 0;
+    for (const el of elements) {
+        const names = PIN_SEMANTICS[el.type];
+        if (!names) continue;
+        checked++;
+        const postsByNet = new Map();
+        for (const post of Object.keys(names)) {
+            const net = netOf.get(`${el.id}:${post}`);
+            if (net === undefined) continue;
+            if (!postsByNet.has(net)) postsByNet.set(net, []);
+            postsByNet.get(net).push(post);
+        }
+        for (const [net, posts] of postsByNet) {
+            if (posts.length < 2) continue;
+            const label = posts.map((p) => names[p]).join(" 与 ");
+            fatal.push({
+                element: el.id,
+                type: el.type,
+                net,
+                pins: posts,
+                message: `${el.id}（${el.type}）的${label}落在同一个网 ${net}`,
+            });
+        }
+    }
+    return { fatal, checked };
+}
+
+/** 拓扑致命时才抛，`--force` 可以强行放行（有人故意接成二极管/短路来玩）。 */
+function assertTopology(result, force) {
+    const lint = lintTopology(result.circuit.elements, result.circuit.nets);
+    if (!lint.fatal.length) return;
+    const detail = lint.fatal.map((f) => f.message).join("；");
+    if (force) {
+        warn(result, `拓扑可疑但 --force 放行：${detail}。仿真结果不保证有意义。`);
+        result.topology = { fatal: lint.fatal, forced: true };
+        return;
+    }
+    result.topology = { fatal: lint.fatal };
+    throw new CliError(
+        `拓扑错误：${detail} —— 器件被导线短路，仿真只会给出无意义的数（通常是 engineSteps=0、全 0 V）。`,
+        "这是自动布线在多端元件上的已知问题：改用 --circuit 内置语料 + --set，或给网表补 layout 坐标。"
+            + "确认电路本来就该这样接，才加 --force。",
+    );
 }
 
 class CliError extends Error {
@@ -466,6 +557,9 @@ async function cmdRun(o) {
             load: { stats: loaded.stats, warnings: (loaded.losses?.conflicts ?? []).length ? loaded.losses.conflicts : undefined },
         };
 
+        // 1b) 拓扑闸：多端元件被短路就别往下跑了（--force 可放行）
+        assertTopology(result, o.force === true);
+
         // 2) 改参数
         if (o.set) {
             const list = [].concat(o.set);
@@ -504,14 +598,21 @@ async function cmdRun(o) {
             }
         }
 
-        // 4) 瞬时测量（t=0 时引擎还没建网表，值可能是空的 → 先推进 1 个引擎步）
+        // 4) 瞬时测量（t=0 时引擎刚建网表：读数要么是空的，要么是 AC 源的 sin(0)=0）
         if (o.measure !== undefined) {
             const nets = listArg(o.measure);
             let m = await toolset.call("sim.read_measurements", nets ? { nets } : {});
-            if (m.ok !== false && Object.keys(m.values ?? {}).length === 0 && !o.step) {
-                await toolset.call("sim.step", { steps: 1 });
-                m = await toolset.call("sim.read_measurements", nets ? { nets } : {});
-                result.autoStepped = "t=0 时无节点电压，已自动推进 1 个引擎步（5µs 量级）";
+            if (!o.step && m.ok !== false && allNearlyZero(m.values)) {
+                // 推进 1 ms（不是 1 个 5µs 引擎步）：对 DC 和低频电路才有意义
+                const adv = await advance(toolset, 0.001);
+                if (adv.ok) {
+                    m = await toolset.call("sim.read_measurements", nets ? { nets } : {});
+                    result.autoStep = {
+                        seconds: 0.001,
+                        t: round(adv.t, 8),
+                        reason: "没给 --step：t≈0 时读数为 0 或空，已自动推进 1 ms 再读",
+                    };
+                }
             }
             if (m.ok === false) throw new CliError(`读数失败：${JSON.stringify(m)}`);
             const values = m.values ?? {};
@@ -529,9 +630,9 @@ async function cmdRun(o) {
                 quantity: m.quantity ?? "voltage",
                 values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, round(v)])),
             };
-            if (Object.values(values).every((v) => v === 0)) {
-                warn(result, "所有节点电压都是 0：可能拓扑断了（导线没接上）、极性反了，或仿真没推进。"
-                    + "用 --shot 看图，或改用 --circuit 内置语料对照。");
+            if (allNearlyZero(values)) {
+                warn(result, "所有节点电压都 ≈0：正弦源在 t≈0 附近本身就是 0（要看幅值请用 --sample）；"
+                    + "若源是直流，则可能是拓扑断了、极性反了，或仿真没推进（用 --shot 看一眼）。");
             }
         }
         if (o.components !== undefined) {
@@ -596,6 +697,17 @@ async function cmdRun(o) {
                 const f = path.join(outDir, "waveform.svg");
                 fs.writeFileSync(f, svg, "utf8");
                 result.sample.svg = f;
+                addArtifact(result, "waveform-svg", f);
+                if (o.png) {
+                    const png = path.join(outDir, "waveform.png");
+                    const r = rasterizeSvg(f, png, { scale: Number(o.scale ?? 2) || 2 });
+                    if (r.ok) {
+                        result.sample.png = png;
+                        addArtifact(result, "waveform-png", png);
+                    } else {
+                        warn(result, `波形 PNG 没生成：${r.reason}。SVG 仍在 ${f}，可直接给用户或自己渲染。`);
+                    }
+                }
                 if (cropFrom != null) result.sample.svgWindow = { from: round(cropFrom, 8), to: round(tEnd, 8), cyclesShown: 5 };
             }
         }
@@ -666,6 +778,17 @@ async function cmdRun(o) {
                 const f = path.join(outDir, "sweep.svg");
                 fs.writeFileSync(f, svg, "utf8");
                 result.sweep.svg = f;
+                addArtifact(result, "sweep-svg", f);
+                if (o.png) {
+                    const png = path.join(outDir, "sweep.png");
+                    const r = rasterizeSvg(f, png, { scale: Number(o.scale ?? 2) || 2 });
+                    if (r.ok) {
+                        result.sweep.png = png;
+                        addArtifact(result, "sweep-png", png);
+                    } else {
+                        warn(result, `扫描图 PNG 没生成：${r.reason}。SVG 仍在 ${f}。`);
+                    }
+                }
             }
         }
 
@@ -678,6 +801,7 @@ async function cmdRun(o) {
                 fs.mkdirSync(path.dirname(f), { recursive: true });
                 fs.writeFileSync(f, finalText, "utf8");
                 result.dump = { file: f, bytes: Buffer.byteLength(finalText) };
+                addArtifact(result, "circuit-text", f);
             }
         }
         if (o.share || o["share-out"]) {
@@ -701,6 +825,7 @@ async function cmdRun(o) {
                 fs.writeFileSync(f, Buffer.from(b64, "base64"));
             }
             result.shot = { file: f, format: svg ? "svg" : "png", bytes: fs.statSync(f).size };
+            addArtifact(result, svg ? "schematic-svg" : "schematic-png", f);
         }
 
         return result;
@@ -763,20 +888,29 @@ function runStep(cmd, args, cwd, label) {
 async function cmdSetup(o) {
     const dir = path.resolve(String(o.dir ?? defaultEngineDir()));
     const url = String(o.url ?? ENGINE_URL);
+    const ref = String(o.ref ?? ENGINE_REF);
     const steps = [];
     let cloned = false;
 
     if (isEngineRepo(dir)) {
-        steps.push({ step: "engine", status: "exists", dir });
+        steps.push({ step: "engine", status: "exists", dir, commit: engineCommit(dir), ref });
     } else {
         if (fs.existsSync(dir) && fs.readdirSync(dir).length) {
             throw new CliError(`${dir} 已存在且非空，但不是 ExtCircuitJS 仓库`, "换一个 --dir，或清理该目录后重试");
         }
         fs.mkdirSync(path.dirname(dir), { recursive: true });
-        runStep("git", ["clone", "--depth", "1", url, dir], path.dirname(dir), `git clone ${url}`);
+        if (/^[0-9a-f]{7,40}$/i.test(ref)) {
+            // 裸 SHA：--branch 接不了，得先建仓库再按 SHA fetch
+            runStep("git", ["init", "-q", dir], path.dirname(dir), `git init ${path.basename(dir)}`);
+            runStep("git", ["-C", dir, "remote", "add", "origin", url], dir, `git remote add origin ${url}`);
+            runStep("git", ["-C", dir, "fetch", "--depth", "1", "origin", ref], dir, `git fetch --depth 1 origin ${ref}`);
+            runStep("git", ["-C", dir, "checkout", "-q", "FETCH_HEAD"], dir, `git checkout ${ref}`);
+        } else {
+            runStep("git", ["clone", "--depth", "1", "--branch", ref, url, dir], path.dirname(dir), `git clone --branch ${ref} ${url}`);
+        }
         cloned = true;
         if (!isEngineRepo(dir)) throw new CliError("克隆完成但没找到 tools/ext.mjs", "确认 --url 指向 ExtCircuitJS 仓库根");
-        steps.push({ step: "engine", status: "cloned", dir, url });
+        steps.push({ step: "engine", status: "cloned", dir, url, ref, commit: engineCommit(dir) });
     }
 
     const coreModules = path.join(dir, "core", "ts", "node_modules");
@@ -806,9 +940,18 @@ async function cmdSetup(o) {
     }
 
     const hasDist = fs.existsSync(distHtml);
+    const commit = engineCommit(dir);
     return {
         ok: true,
-        engine: { dir, cloned, dist: hasDist ? path.join(dir, "dist") : null, url },
+        engine: {
+            dir,
+            cloned,
+            dist: hasDist ? path.join(dir, "dist") : null,
+            url,
+            ref,
+            commit,
+            describe: engineDescribe(dir),
+        },
         steps,
         next: [
             `node ${path.join(SKILL_DIR, "scripts", "circuitlab.mjs")} probe`,
@@ -836,6 +979,16 @@ async function cmdProbe(o) {
             dist: fs.existsSync(path.join(repo, "dist", "circuitjs.html")),
             playwrightCore: hasPlaywrightCore(repo),
         };
+        // 引擎版本必须可见：README 里的数字只对钉住的那个版本保证可复现
+        out.engine = {
+            dir: repo,
+            ref: ENGINE_REF,
+            commit: engineCommit(repo),
+            describe: engineDescribe(repo),
+        };
+        if (out.engine.describe && !String(out.engine.describe).startsWith(ENGINE_REF)) {
+            out.engine.note = `引擎不是钉住的 ${ENGINE_REF}（当前 ${out.engine.describe}）：数值可能与本 skill 文档里的实测值有差异。`;
+        }
         if (!out.capabilities.playwrightCore) {
             out.hint = ["缺 playwright-core（无头浏览器驱动），补一次就好：", `  cd ${repo} && npm install --no-save playwright-core`];
         }
@@ -924,7 +1077,8 @@ async function cmdShare(o) {
 async function cmdShot(o) {
     const { repo } = resolveRepo(o.repo);
     if (!repo) throw new CliError("找不到 ExtCircuitJS 仓库");
-    const target = path.resolve(String(o.out ?? "circuit.svg"));
+    // --shot 与 --out 都当目标文件（--out 是历史写法，兼容）
+    const target = path.resolve(String(o.shot ?? o.out ?? "circuit.svg"));
     const svg = target.toLowerCase().endsWith(".svg");
     const { backend, toolset } = await attach({ repo, base: o.base, allowSpawn: o["no-spawn"] !== true, log });
     try {
@@ -934,7 +1088,19 @@ async function cmdShot(o) {
         fs.mkdirSync(path.dirname(target), { recursive: true });
         if (svg) fs.writeFileSync(target, shot.data, "utf8");
         else fs.writeFileSync(target, Buffer.from(String(shot.data).replace(/^data:image\/png;base64,/, ""), "base64"));
-        return { ok: true, file: target, format: svg ? "svg" : "png", bytes: fs.statSync(target).size };
+
+        // 出图的同时顺手查拓扑：图照给，但短路要明说
+        const comps = await toolset.call("circuit.list_components");
+        const nl = await toolset.call("circuit.get_netlist");
+        const elements = (comps.components ?? []).filter((c) => c.type !== "WireElm");
+        const lint = lintTopology(elements, nl.netlist?.nets ?? []);
+        const out = { ok: true, file: target, format: svg ? "svg" : "png", bytes: fs.statSync(target).size };
+        if (lint.fatal.length) {
+            out.topology = { fatal: lint.fatal };
+            out.warning = `拓扑可疑：${lint.fatal.map((f) => f.message).join("；")} —— 这张图的仿真结果无意义。`;
+            process.stderr.write(`[warn] ${out.warning}\n`);
+        }
+        return out;
     } finally {
         try {
             await backend.dispose();

@@ -30,7 +30,11 @@
 |---|---|---|
 | 手写 XML 后读数全 0、不报错 | 坐标差 1 px = 静默开路 | 别手写坐标；用网表 JSON 让编译器布局 |
 | `needs_layout` | 多端元件 + 无坐标 | 换 2 端元件，或用内置语料，或补 `layout` 坐标 |
-| **多端元件（运放/555/晶体管）网表跑不动** | 自动布线在某些拓扑上生成重复/交叉导线，拓扑硬闸没拦住；表现为 `engineSteps=0`、读数全 0 | 改用内置语料 + `--set`；`--shot` 看图确认 |
+| **多端元件（运放/555/晶体管）网表跑不动** | 自动布线在某些拓扑上生成重复/交叉导线；表现为 `engineSteps=0`、读数全 0 | 改用内置语料 + `--set`；`--shot out.png` 看图确认 |
+| `拓扑错误：… 集电极 C 与 发射极 E 落在同一个网` | CLI 的仿真前拓扑闸发现器件被短接（自动布线把两个功率脚并了） | 这是真错误，改接线或换内置语料；`--force` 只用于"故意短路" |
+| 没给 `--step` 也拿到了非 0 读数 | 正常：`--measure` 会自动推进 1 ms 再读，结果里的 `autoStep` 写明了 | 想控制时间点就显式给 `--step` |
+| `--png` 没生成图片 | 本机找不到 Chrome/Edge，或栅格化超时；SVG 仍然可用 | 设 `EXT_CHROME` 指向浏览器；或直接用 `--shot out.png`（引擎自己渲染） |
+| `probe` 的 `engine.note` 说版本不符 | 引擎不是钉住的 commit，数值可能与文档差一点 | `setup --ref <sha>` 重装钉住版本，或跑 `node scripts/smoke.mjs` 看偏差 |
 | 参数改了 `applied: 0` | 字段名写错（`capacitor` vs `capacitance`） | 看 `circuit.elements[].props` 的真实键名 |
 | 网表载入了但网名对不上 | 引擎把自定义网名改成 `n0/n1…` | 看 `circuit.nets[].pins` 判拓扑 |
 | 导线一堆、元件 id 跳号 | 自动布线生成的 `WireElm` 也占 id | 正常现象；`circuit.elements` 已滤掉导线 |

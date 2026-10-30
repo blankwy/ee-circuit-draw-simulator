@@ -23,7 +23,7 @@
 | 你问 | 它给 |
 |---|---|
 | "这个 RC 滤波器的截止频率是多少？" | 扫频后的幅频响应，−3 dB 点由实测 Vpp 算出 |
-| "这个 555 跑多快？" | 实测 239.5 Hz、占空比 49.6%（窗口 t=0.2–0.8 s） |
+| "这个 555 跑多快？" | 实测 239.6 Hz、占空比 49.6%（窗口 t=0.2–0.8 s） |
 | "R2 换成 22 kΩ 会怎样？" | 同一次扫描里两组数，可直接比 |
 | "画个波形 / 画个电路图" | 内联 SVG，自带坐标轴与图例 |
 | "我想自己调调看" | 分享链接，点开就是可交互电路 |
@@ -34,7 +34,7 @@
 | 电路 | 结果 |
 |---|---|
 | RC 低通，R=1 kΩ、C=100 nF | 100 Hz–6.4 kHz 之间 Vpp 从 9.98 掉到 2.40 V；1.6 kHz 处 0.707×（理论 1591 Hz） |
-| 555 无稳态，R2 = 10 k / 22 k / 47 k | 239.5 Hz / 108.8 Hz / 50.8 Hz，占空比 48–50% |
+| 555 无稳态，R2 = 10 k / 22 k / 47 k | 239.6 Hz / 108.8 Hz / 50.8 Hz，占空比 48–50% |
 | 运放同相放大，R2/R1 = 2 k/1 k | 增益 3：1 V 输入 → 3.00 V 输出；用原本的 5 V 源会削顶在 ±15 V 轨 |
 | 分压器 9 V、1 k/2 k | 分压点 6 V |
 
@@ -165,8 +165,9 @@ node $CLI corpus --search 555
 # 一轮完整仿真：载入 → 读数
 node $CLI run --circuit lrc --measure all
 
-# 波形：240 Hz 方波采 0.6 s，出 SVG
-node $CLI run --circuit 555square --sample n2 --span 0.6 --points 2000 --settle 0.2 --svg
+# 波形 + 电路图，一次调用出齐：240 Hz 方波采 0.6 s，PNG 给人看
+node $CLI run --circuit 555square --sample n2 --span 0.6 --points 2000 --settle 0.2 \
+  --svg --png --shot out/555.png
 
 # 参数扫描：同一次运行三组值，可横向比
 node $CLI run --circuit 555square --sweep e14.resistance=10k,22k,47k \
@@ -180,8 +181,8 @@ node $CLI run --netlist ~/ee-circuit-draw-simulator/references/examples/rc-lowpa
 # 分享链接（不需要浏览器）
 node $CLI share --circuit lrc
 
-# 导出电路图
-node $CLI shot --circuit lrc --out lrc.svg
+# 导出电路图（给人看 .png，存档 .svg）
+node $CLI shot --circuit lrc --out lrc.png
 ```
 
 `stdout` 永远只有一个 JSON 对象，诊断信息走 `stderr`。这是故意的：助手可以直接把结果接进推理，
@@ -197,7 +198,11 @@ node $CLI shot --circuit lrc --out lrc.svg
 | `--measure all \| n1,n2` / `--components` | 瞬时节点电压 / 元件电流 |
 | `--sample` `--span` `--points` `--settle` | 时域采样，不依赖引擎自带的示波器缓冲 |
 | `--sweep <ref>=v1,v2,…` `--probe` `--logx` | 参数扫描，一个值一行结果 |
-| `--svg` `--shot` `--share` `--dump` | 波形图、电路图、分享链接、电路文本 |
+| `--svg` `--png` | 矢量波形图，外加一份给人看的 PNG（无头 Chrome/Edge 栅格化，`--scale` 默认 2×） |
+| `--shot` `--share` `--dump` | 电路图（按扩展名给 .png/.svg）、分享链接、电路文本 |
+| `--force` | 跳过拓扑闸——只在故意短路时才用 |
+
+运行产出的每个文件都在 `artifacts[]` 里带绝对路径，agent 不用猜 `--out` 把东西放哪了。
 
 ## 目录
 
@@ -222,6 +227,22 @@ ee-circuit-draw-simulator/
 3. 不手写坐标：手写 XML 差 1 px 就是静默开路。
 4. 多端元件（运放、555、晶体管）用内置语料 + `--set`；把这类电路手写成网表，自动布线可能让求解停住，CLI 会报出来。
 5. 采样太稀不藏着：`resolutionWarning` 就是"加大 `--points` 重跑"。
+6. **器件被短路，在仿真之前就失败**：三极管的 C/E、MOS 的 D/S 落到同一个网，CLI 直接报
+   `拓扑错误` 并中止。否则会得到一次"看着正常、处处 0 V"的仿真。
+7. **图默认给 PNG**：`--png` 与 `--shot x.png` 走无头 Chrome/Edge 栅格化。SVG 是单行 9 KB
+   文本，按行读取的工具读不回来，别指望它。
+
+## 可复现
+
+- `setup` 检出的是**钉住的引擎 commit**，不是 `HEAD`——否则"这些数字可复现"这个承诺会随引擎一升级就作废。要换版本用 `setup --ref <sha|tag|branch>`。
+- `probe` 会回报 `engine.commit` / `engine.describe`；你的引擎不是钉住那个版本时会明确提示。
+- `npm run smoke` 把这份 README 里的数重算一遍——555 的频率与占空比、RC 的 −3 dB 点、分压、运放增益、拓扑闸——偏了就非零退出：
+
+```bash
+npm run smoke
+# 555 频率 239.6 Hz ±0.8 | 占空比 0.496 ±0.02 | R2=22k 108.8 Hz ±1 | …
+# 全部 11 项通过。
+```
 
 ## 边界
 

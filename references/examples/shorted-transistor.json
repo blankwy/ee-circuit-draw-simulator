@@ -1,0 +1,16 @@
+{
+  "schema": "netlist/0.1",
+  "_comment": "反例：三极管的集电极与发射极被接到同一个网 —— 器件被短接。CLI 应在仿真前就拦下，用于 smoke test。",
+  "components": [
+    { "id": "v1", "type": "VoltageElm", "props": { "maxVoltage": 9, "waveform": 0 } },
+    { "id": "r1", "type": "ResistorElm", "props": { "resistance": 1000 } },
+    { "id": "q1", "type": "TransistorElm", "props": { "beta": 100 } },
+    { "id": "g1", "type": "GroundElm", "props": {} }
+  ],
+  "nets": [
+    { "id": "b", "pins": ["v1:0", "r1:0"] },
+    { "id": "nc", "pins": ["r1:1", "q1:0"] },
+    { "id": "ce", "pins": ["q1:1", "q1:2"] },
+    { "id": "gnd", "pins": ["v1:1", "g1:0"], "ground": true }
+  ]
+}
