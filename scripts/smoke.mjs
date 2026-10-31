@@ -139,6 +139,44 @@ step("--jobs：一进程多作业 + 单作业失败隔离");
     const tap = (first?.circuit?.nets ?? []).find((n) => (n.pins ?? []).includes("e2:1") && (n.pins ?? []).includes("e3:0"));
     const raw = tap ? first.measurements?.values?.[tap.id] : undefined;
     check("批处理：分压点 (|V|)", { got: Math.abs(raw), want: 6, tol: 0.05 });
+    const code = second?.error?.code === "topology.shorted_device";
+    CASES.push({ name: "错误码 topology.*", got: code ? 1 : 0, want: 1, tol: 0, unit: "", ok: code });
+}
+
+// 8) 复合波形的基频：60 Hz 上叠 120 Hz 分量，数过零点会翻倍报成 120（issue #3）
+step("复合波形：60 Hz + 120 Hz 应报 60 Hz");
+{
+    const j = run(["run", "--circuit", "amp-diff", "--sample", "n4", "--settle", "0.1", "--span", "0.5", "--points", "1000"]);
+    if (!j.ok) throw new Error(`amp-diff 采样失败：${JSON.stringify(j.error)}`);
+    const c = j.sample.channels[0];
+    check("复合波形基频 (Hz)", { got: c.freqEstimate, want: 60, tol: 2 });
+    const listed = c.periodic === true && Array.isArray(c.components) && c.components.length >= 2;
+    CASES.push({ name: "复合波形给出分量", got: listed ? 1 : 0, want: 1, tol: 0, unit: "", ok: listed });
+}
+
+// 9) --sample all 应略过 GND 与恒值网（issue #4）
+step("--sample all：略过 GND 与恒值网");
+{
+    const j = run(["run", "--circuit", "lrc", "--sample", "all", "--span", "0.02", "--points", "200"]);
+    if (!j.ok) throw new Error(`lrc 采样失败：${JSON.stringify(j.error)}`);
+    const chans = j.sample.channels.map((c) => c.net);
+    const constant = j.sample.omitted?.constant ?? [];
+    const clean = chans.length > 0 && chans.every((n) => !constant.some((c) => c.net === n));
+    CASES.push({ name: "恒值网不进 channels", got: clean ? 1 : 0, want: 1, tol: 0, unit: "", ok: clean });
+    const told = constant.length > 0 && Array.isArray(j.sample.omitted?.ground);
+    CASES.push({ name: "省略项有告知", got: told ? 1 : 0, want: 1, tol: 0, unit: "", ok: told });
+}
+
+// 10) 只给 --png 也要出图（issue #2：以前静默产出零个文件、exit 0）
+step("只给 --png 应自动补 SVG 并出 PNG");
+{
+    const j = run(["run", "--circuit", "lrc", "--sample", "n1", "--span", "0.02", "--points", "200", "--png"]);
+    if (!j.ok) throw new Error(`--png 运行失败：${JSON.stringify(j.error)}`);
+    const kinds = (j.artifacts ?? []).map((a) => a.kind);
+    const hasPng = kinds.includes("waveform-png");
+    CASES.push({ name: "只给 --png 出 PNG", got: hasPng ? 1 : 0, want: 1, tol: 0, unit: "", ok: hasPng });
+    const hasSvg = kinds.includes("waveform-svg");
+    CASES.push({ name: "同时补出 SVG 中间件", got: hasSvg ? 1 : 0, want: 1, tol: 0, unit: "", ok: hasSvg });
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────

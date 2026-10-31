@@ -1,6 +1,6 @@
 {
   "name": "ee-circuit-draw-simulator",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Agent skill for real circuit simulation: draw, simulate, measure, plot and share circuits instead of guessing numbers.",
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -22,6 +22,7 @@
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
+    "assets/",
     "scripts/",
     "references/"
   ],
@@ -29,7 +30,8 @@
     "setup": "node scripts/circuitlab.mjs setup",
     "probe": "node scripts/circuitlab.mjs probe",
     "check": "node --check scripts/circuitlab.mjs && node --check scripts/lib/backend.mjs && node --check scripts/lib/svg.mjs && node --check scripts/lib/units.mjs && node --check scripts/smoke.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run check && npm run smoke"
   },
   "engines": {
     "node": ">=22"

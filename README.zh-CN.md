@@ -1,5 +1,7 @@
 # 电子电路绘制仿真助手
 
+<img src="assets/icon-256.png" width="88" height="88" align="right" alt="运放三角形，输出端化成正弦波">
+
 [English](README.md) · **简体中文**
 
 一个 [Agent Skill](https://skill.md)：让 AI 助手**真的把电路跑起来**，而不是凭记忆描述。
@@ -201,6 +203,7 @@ node $CLI shot --circuit lrc --out lrc.png
 | `--svg` `--png` | 矢量波形图，外加一份给人看的 PNG（无头 Chrome/Edge 栅格化，`--scale` 默认 2×） |
 | `--shot` `--share` `--dump` | 电路图（按扩展名给 .png/.svg）、分享链接、电路文本 |
 | `--force` | 跳过拓扑闸——只在故意短路时才用 |
+| `--include-supply` | `--sample all` 时连 GND 与恒值网一起输出（默认略过） |
 | `--jobs <json\|@文件>` | 一个进程跑多个作业（共用一个后端）。顶层参数当默认值，每个作业有自己的 `--out` 子目录 |
 
 运行产出的每个文件都在 `artifacts[]` 里带绝对路径，agent 不用猜 `--out` 把东西放哪了。
@@ -252,15 +255,17 @@ ee-circuit-draw-simulator/
 
 ## 可复现
 
-- `setup` 检出的是**钉住的引擎 commit**，不是 `HEAD`——否则"这些数字可复现"这个承诺会随引擎一升级就作废。要换版本用 `setup --ref <sha|tag|branch>`。
-- `probe` 会回报 `engine.commit` / `engine.describe`；你的引擎不是钉住那个版本时会明确提示。
-- `npm run smoke` 把这份 README 里的数重算一遍——555 的频率与占空比、RC 的 −3 dB 点、分压、运放增益、拓扑闸——偏了就非零退出：
+- `setup` 检出的是**钉住的引擎 commit**，不是 `HEAD`——否则"这些数字可复现"这个承诺会随引擎一升级就作废。要换版本用 `setup --ref <sha|tag|branch>`。它还会写一份 `.ee-engine.json`（commit、提交日期、构建时间）：浅克隆没有历史，"我这版引擎是什么时候的"事后查不了。
+- `probe` 会回报 `engine.commit` / `engine.commitDate` / `engine.describe`；你的引擎不是钉住那个版本时会明确提示。
+- `npm run verify` = 语法 + skill 元数据检查，再跑 `smoke`。`npm run smoke` 把这份 README 里的数重算一遍——555 的频率与占空比、RC 的 −3 dB 点、分压、运放增益、拓扑闸的错误码、复合波形基频、`--sample all` 的过滤、只给 `--png` 的产出——偏了就非零退出：
 
 ```bash
-npm run smoke
-# 555 频率 239.6 Hz ±0.8 | 占空比 0.496 ±0.02 | R2=22k 108.8 Hz ±1 | …
-# 全部 11 项通过。
+npm run verify
+# 555 频率 239.6 Hz ±0.8 | RC 比值 0.7065 ±0.02 | 复合波形基频 60 Hz ±2 | …
+# 全部 21 项通过。
 ```
+
+- `.github/workflows/verify.yml` 在每次 push / PR 上跑这套，数字就不会静默失真。它要从零装一遍钉住的引擎（clone + core install + build），所以这条流水线要几分钟。
 
 ## 边界
 

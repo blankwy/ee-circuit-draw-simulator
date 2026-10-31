@@ -9,7 +9,7 @@ allowed-tools:
   - Glob
   - Grep
 metadata:
-  version: 0.3.0
+  version: 0.3.1
   homepage: https://github.com/blankwy/ee-circuit-draw-simulator
   engine: ExtCircuitJS (CircuitJS1 fork; real nodal-analysis simulator driven headlessly over an MCP bridge)
   trigger: 电路仿真、波形、元件参数、滤波器/振荡器/放大器、生成电路图、分享可交互电路
@@ -119,9 +119,24 @@ node <skill>/scripts/circuitlab.mjs run --netlist <skill>/references/examples/rc
 ### 4. 读数怎么写进回答
 
 `sample.channels[]` 每个网给：`min / max / vpp / mean / rms / final / dutyCycle / dutyAboveMid / freqEstimate`。
-`freqEstimate` 与 `dutyCycle` 由过中点时刻**线性插值**算出（不是数窗口边缘的边沿），所以
-`--points` 从 600 加到 4000，同一个 555 的频率只在 239.6 Hz 附近抖动 ±0.1 Hz；`dutyAboveMid`
-是纯采样计数，粗看用。`--measure` 给瞬时值，`--components` 给元件电流。
+`--measure` 给瞬时值，`--components` 给元件电流。
+
+**频率是频谱算出来的，不是数过零点**。叠加波形上数过零点会把频率翻倍（60 Hz 上叠 120 Hz
+会报成 120 Hz），所以现在用 DFT 找基频，另外两个字段说明它靠不靠得住：
+
+| 字段 | 含义 |
+|---|---|
+| `freqEstimate` | 基频。只在 `periodic` 成立时给出 |
+| `periodic` | 能量是否落在该频率的整数倍上（方波/锯齿成立，噪声不成立） |
+| `tonal` | 主峰是否独大（≈正弦）。`false` 表示"基频对，但波形不是正弦"，此时幅值请用 `vpp` |
+| `components[]` | 前几个分量的 `{f, amp}`，复合波形用它说明"60 Hz 为主，叠了 1 V 的 120 Hz" |
+| `freqNote` | 判不出基频 / 采样太稀会混叠时的说明 |
+
+**没有 `freqEstimate` 不代表出错**：可能是 `freqNote` 说的混叠（加大 `--points`）或非周期波形。
+这时宁可写"看不出基频"，也不要拿 `vpp` 反推一个频率。
+
+`--sample all` 默认**省略 GND 与恒值网**（恒 0、恒定 5 V 这类是数字不是波形，只会压扁图），
+省略了什么写在 `sample.omitted` 里；需要全都保留就加 `--include-supply`。
 
 写结论时必须带**数值 + 单位 + 条件**：
 
@@ -155,11 +170,17 @@ node <skill>/scripts/circuitlab.mjs run --circuit 555square --set e14.resistance
 7. **读数全 0 时先看 `autoStep`**：没给 `--step` 时 CLI 会自动推进 1 ms 再读，并在结果里写明；
    若仍全 0，是拓扑断了或源本身在 t≈0 处为 0（正弦源就是这样，要看幅值用 `--sample`）。
 8. **图的默认形式是 PNG**。给人看的图加 `--png`（波形/扫描）或 `--shot x.png`（电路图）；
-   SVG 只用于存档或需要矢量时。**不要试图 Read 一个 SVG 再内联**——它是单行文本，
-   Read 按行截断在 2000 字符，读不全，纯属浪费回合。
+   SVG 只用于存档或需要矢量时。**只给 `--png` 就够了**——CLI 会自动补出 SVG 中间文件
+   （栅格化本来就需要它），并把两张都登记进 `artifacts[]`。
+   **不要试图 Read 一个 SVG 再内联**——它是单行文本，Read 按行截断在 2000 字符，读不全，
+   纯属浪费回合。
 9. **`拓扑错误` 是真错误，不要 `--force` 糊过去**。CLI 在仿真前检查三极管 C/E、MOS 的 D/S
    是否被接到同一个网——接上了就是器件被短路，读数一定无意义。正确做法是换内置语料或补
    `layout` 坐标，而不是强行跑。`--force` 只留给"我就是要接成二极管/短路"这类明确意图。
+10. **按 `error.code` 分支，不要匹配中文句子**。失败时 `error` 带稳定 `code`
+    （`topology.shorted_device` / `engine.not_found` / `engine.unreachable` / `port.occupied` /
+    `artifact.not_generated` / `net.unknown` / `param.unknown` / `circuit.not_in_corpus` /
+    `sim.step_failed` / `usage.*`），能机器判断的就别靠读文案。
 
 ## 五、图怎么放进回答
 
@@ -167,9 +188,9 @@ node <skill>/scripts/circuitlab.mjs run --circuit 555square --set e14.resistance
 
 | 想要 | 命令 | `artifacts[].kind` |
 |---|---|---|
-| 波形图（给人看） | `--sample … --svg --png` | `waveform-png` |
+| 波形图（给人看） | `--sample … --png` | `waveform-png` |
 | 波形图（矢量存档） | `--sample … --svg` | `waveform-svg` |
-| 扫描曲线 | `--sweep … --svg --png` | `sweep-png` |
+| 扫描曲线 | `--sweep … --png` | `sweep-png` |
 | 电路图 | `--shot out.png` / `--shot out.svg` | `schematic-png` / `schematic-svg` |
 | 电路文本 | `--dump out.txt` | `circuit-text` |
 

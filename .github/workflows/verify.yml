@@ -1,0 +1,43 @@
+name: verify
+
+# 为什么要有这条流水线：
+# 这个 skill 的全部信誉建立在"每个数字都由引擎实测产出、可复现"上。引擎一升级，
+# README 里的 239.6 Hz 可能悄悄变成别的值，而文档不会自己报警。smoke.mjs 就是那道闸，
+# 这里负责让它真的被执行 —— 否则它只是仓库里一个没人跑的文件。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 语法与 skill 元数据
+        run: |
+          npm run check
+          node .github/scripts/check-skill.mjs
+
+      - name: 装钉住的引擎（clone + core install + build）
+        run: node scripts/circuitlab.mjs setup
+
+      - name: 引擎版本（写进日志，数字对不上时能对着看）
+        run: node scripts/circuitlab.mjs probe
+
+      # 用 setup 钉住的 commit 跑，结果才有可比性；引擎漂移会在这里变红，
+      # 从而把"换引擎"变成一次需要显式确认的变更。
+      - name: 重算文档里的实测数字
+        run: node scripts/smoke.mjs

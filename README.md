@@ -1,5 +1,7 @@
 # EE Circuit Draw & Simulator
 
+<img src="assets/icon-256.png" width="88" height="88" align="right" alt="An op-amp triangle whose output becomes a sine wave">
+
 **English** · [简体中文](README.zh-CN.md)
 
 An [Agent Skill](https://skill.md) that makes your coding agent **actually simulate circuits** instead of describing them from memory. Load or author a circuit, change a resistor, step the simulator deterministically, read node voltages, sample waveforms, sweep a parameter, render an SVG — and hand back a link that opens a live circuit.
@@ -191,6 +193,7 @@ Key flags:
 | `--svg` `--png` | Vector plot, plus a raster copy for humans (headless Chrome/Edge, `--scale` 2× by default) |
 | `--shot` `--share` `--dump` | Schematic (.png/.svg by extension), share URL, circuit text |
 | `--force` | Skip the topology gate — only when a shorted device is intentional |
+| `--include-supply` | With `--sample all`, also emit GND and constant-value nets (they are skipped by default) |
 | `--jobs <json\|@file>` | Run several jobs in one process (they share the backend). Top-level flags are defaults; each job gets its own `--out` subdirectory |
 
 Every file the run produces is listed in `artifacts[]` with an absolute path, so an agent never has to guess where `--out` put things.
@@ -238,15 +241,17 @@ ee-circuit-draw-simulator/
 
 ## Reproducibility
 
-- `setup` checks out a **pinned engine commit**, not `HEAD` — otherwise "these numbers are reproducible" expires as soon as the engine moves. Override with `setup --ref <sha|tag|branch>`.
-- `probe` echoes `engine.commit` / `engine.describe`, and warns when your checkout is not the pinned one.
-- `npm run smoke` re-derives the numbers in this README — 555 frequency and duty, the RC −3 dB point, the divider, op-amp gain, and the topology gate — and fails on drift:
+- `setup` checks out a **pinned engine commit**, not `HEAD` — otherwise "these numbers are reproducible" expires as soon as the engine moves. Override with `setup --ref <sha|tag|branch>`. It also writes `.ee-engine.json` (commit, commit date, build time), because a shallow clone leaves no history to answer "which engine am I on".
+- `probe` echoes `engine.commit` / `engine.commitDate` / `engine.describe`, and warns when your checkout is not the pinned one.
+- `npm run verify` = syntax + skill metadata check, then `smoke`. `npm run smoke` re-derives the numbers in this README — 555 frequency and duty, the RC −3 dB point, the divider, op-amp gain, the topology gate's error code, the composite-waveform fundamental, `--sample all` filtering and `--png`-only output — and fails on drift:
 
 ```bash
-npm run smoke
-# 555 频率 239.6 Hz ±0.8 | 占空比 0.496 ±0.02 | R2=22k 108.8 Hz ±1 | …
-# 全部 11 项通过。
+npm run verify
+# 555 频率 239.6 Hz ±0.8 | RC 比值 0.7065 ±0.02 | 复合波形基频 60 Hz ±2 | …
+# 全部 21 项通过。
 ```
+
+- `.github/workflows/verify.yml` runs that on every push and PR, so the numbers cannot drift silently. It installs the pinned engine from scratch (clone + core install + build), which is why the job takes a few minutes.
 
 ## Limitations
 

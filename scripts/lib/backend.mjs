@@ -9,6 +9,7 @@
 // ERR_INVALID_PROTOCOL；Pages 站点只用于「给人点开看」，不能驱动 AI 仿真。
 
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -55,6 +56,31 @@ export function engineCommit(dir) {
     }
 }
 
+/** 引擎 commit 的提交时间（ISO）。浅克隆也有，不用 --unshallow。 */
+export function engineCommitDate(dir) {
+    if (!dir) return null;
+    try {
+        const r = spawnSync("git", ["-C", dir, "log", "-1", "--format=%cI"], { encoding: "utf8", timeout: 8000 });
+        return r.status === 0 ? String(r.stdout).trim() || null : null;
+    } catch {
+        return null;
+    }
+}
+
+/** setup 写的安装元数据文件名（放在引擎目录里，git 未跟踪文件不会让 describe --dirty 变脏）。 */
+export const ENGINE_META_FILE = ".ee-engine.json";
+
+/** 读 setup 留下的安装元数据（没有就返回 null）。 */
+export function engineMeta(dir) {
+    if (!dir) return null;
+    try {
+        const f = path.join(dir, ENGINE_META_FILE);
+        return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * 技能目录是不是躺在某个 node_modules 里（npx / -g / 装成依赖）。
  * 那种位置的目录会被升级、`npm cache clean`、临时安装目录回收抹掉。
@@ -81,6 +107,27 @@ export function isEngineRepo(dir) {
 }
 
 /**
+ * 目录存在、但不像一个完整的引擎 —— 返回缺什么。
+ *
+ * 为什么不能只看"目录存在"：上次 setup 中断留下的空目录会被当成"我明明装过了"，
+ * 排查时一路走偏（issue #7）。判据必须是内容，不是存在性。
+ */
+export function engineIncomplete(dir) {
+    if (!dir || !fs.existsSync(dir)) return null;
+    let st = null;
+    try {
+        st = fs.statSync(dir);
+    } catch {
+        return null;
+    }
+    if (!st.isDirectory()) return null;
+    const missing = [];
+    if (!fs.existsSync(path.join(dir, "tools", "ext.mjs"))) missing.push("tools/ext.mjs");
+    if (!fs.existsSync(path.join(dir, "packages", "mcp", "src", "backend.ts"))) missing.push("packages/mcp/src/backend.ts");
+    return missing.length ? { dir, missing } : null;
+}
+
+/**
  * 引擎的 MCP 桥必须有 playwright-core，但引擎故意不把它写进依赖。
  * 与 backend.ts 的 resolvePwCore 保持同一套查找位置：仓库根 / core/ts / EXT_PW_CORE。
  */
@@ -95,9 +142,15 @@ export function hasPlaywrightCore(repo) {
     return false;
 }
 
+/** 路径名看着像引擎目录（用来区分"本想装引擎的地方"和无关的上级目录）。 */
+function looksLikeEngineDir(dir) {
+    return /extcircuitjs|circuitjs/i.test(path.basename(dir));
+}
+
 /** 仓库根：显式参数 → 环境变量 → 随技能克隆的 vendor/ → 同级目录 → HOME → cwd。 */
 export function resolveRepo(explicit) {
     const tried = [];
+    const incomplete = [];
     const cands = [
         explicit,
         process.env.EXTCIRCUIT_HOME,
@@ -110,12 +163,21 @@ export function resolveRepo(explicit) {
         process.cwd(),
     ].filter(Boolean);
 
+    // 明确指向的位置（--repo / 环境变量 / 默认安装点）用户一定是想装引擎的，
+    // 哪怕目录名不像，也要做完整性检查；其余候选只在名字像引擎时才检查。
+    const intentional = new Set(
+        [explicit, process.env.EXTCIRCUIT_HOME, process.env.EXT_REPO, defaultEngineDir()].filter(Boolean).map((p) => path.resolve(p)),
+    );
+
     for (const c of cands) {
         const dir = path.resolve(c);
         tried.push(dir);
-        if (isEngineRepo(dir)) return { repo: dir, tried };
+        if (isEngineRepo(dir)) return { repo: dir, tried, incomplete };
+        // 目录在、但内容不全：记下来，报错时点名，别让用户以为"装过了"
+        const half = intentional.has(dir) || looksLikeEngineDir(dir) ? engineIncomplete(dir) : null;
+        if (half && !incomplete.some((x) => x.dir === half.dir)) incomplete.push(half);
     }
-    return { repo: null, tried };
+    return { repo: null, tried, incomplete };
 }
 
 export function defaultBases() {
@@ -125,25 +187,73 @@ export function defaultBases() {
     return [...new Set(out)];
 }
 
-async function reachable(base, timeoutMs = 2500) {
+/**
+ * 带 code 的引擎错误。上层按 code 分支，不靠匹配中文句子。
+ *
+ * 为什么必须结构化：调用方是模型，它按 `code` 走分支是稳定的，字符串匹配改一个标点就失效。
+ */
+export class EngineError extends Error {
+    constructor(message, { code = "engine.error", hint = null, details = null } = {}) {
+        super(message);
+        this.name = "EngineError";
+        this.code = code;
+        this.hint = hint;
+        this.details = details;
+    }
+}
+
+/**
+ * 探一个地址：是引擎 / 是别人的服务 / 没人应答。
+ *
+ * 三种状态必须分开 —— 只判 `r.ok` 会把"端口被别的程序占着（返回 404）"当成"不可达"，
+ * 于是去那个端口起服务，白等到超时还不说真因（issue #1）。
+ */
+async function probeBase(base, timeoutMs = 2500) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
         const r = await fetch(`${base.replace(/\/$/, "")}/circuitjs.html`, { signal: ctl.signal, redirect: "follow" });
-        return r.ok;
+        return r.ok ? "engine" : "stranger";
     } catch {
-        return false;
+        return "closed";
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function reachable(base, timeoutMs = 2500) {
+    return (await probeBase(base, timeoutMs)) === "engine";
+}
+
+/** 这个端口现在能绑吗？抢不到就别往那儿起服务，省掉 45 秒白等。 */
+function canBind(port, host = "127.0.0.1") {
+    return new Promise((resolve) => {
+        const srv = net.createServer();
+        const done = (ok) => {
+            srv.removeAllListeners();
+            try {
+                srv.close();
+            } catch {
+                /* ignore */
+            }
+            resolve(ok);
+        };
+        srv.once("error", () => done(false));
+        srv.once("listening", () => done(true));
+        try {
+            srv.listen({ port, host, exclusive: true });
+        } catch {
+            done(false);
+        }
+    });
 }
 
 /** 只探活，不 attach（快，不启浏览器）。 */
 export async function probe({ bases = defaultBases(), timeoutMs = 2500 } = {}) {
     const results = [];
     for (const base of bases) {
-        const ok = await reachable(base, timeoutMs);
-        results.push({ base, reachable: ok });
+        const state = await probeBase(base, timeoutMs);
+        results.push({ base, reachable: state === "engine", state });
     }
     return results;
 }
@@ -167,13 +277,20 @@ function startServer(repo, mode, port) {
     const args = [path.join(repo, "tools", "ext.mjs"), mode, "--port", String(port)];
     const child = spawn(process.execPath, args, {
         cwd: repo,
-        stdio: "ignore",
+        // 必须接住管道：子进程的 stderr 里就有 EADDRINUSE 这种真因，忽略掉就只能猜
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
         env: { ...process.env, BROWSER: "none" },
     });
+    let stderr = "";
+    child.stdout?.resume();
+    child.stderr?.on("data", (b) => {
+        stderr = (stderr + b.toString()).slice(-4000); // 只留尾巴，够定位
+    });
     child.on("error", () => {});
-    spawned.push({ child, mode, port });
-    return child;
+    const rec = { child, mode, port, stderr: () => stderr.trim() };
+    spawned.push(rec);
+    return rec;
 }
 
 /** 收掉本进程启动的所有后端（幂等）。 */
@@ -194,13 +311,22 @@ export function shutdownSpawned() {
 
 process.on("exit", shutdownSpawned);
 
-async function waitFor(base, { timeoutMs = 45000, intervalMs = 400 } = {}) {
+/**
+ * 等后端起来。子进程一旦退出就立刻返回，不再把剩下的超时等满。
+ * （以前端口被占时 EADDRINUSE 之后还要干等 45 秒，见 issue #1）
+ */
+async function waitFor(base, { timeoutMs = 45000, intervalMs = 400, child = null } = {}) {
+    let exit = null;
+    child?.once("exit", (code, signal) => {
+        exit = { code, signal };
+    });
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        if (await reachable(base, 1200)) return true;
+        if (exit) return { ok: false, reason: "exited", exit };
+        if (await reachable(base, 1200)) return { ok: true };
         await new Promise((r) => setTimeout(r, intervalMs));
     }
-    return false;
+    return { ok: false, reason: "timeout" };
 }
 
 let backendModule = null;
@@ -217,22 +343,25 @@ async function loadBackendModule(repo) {
  */
 export async function attach({ repo, base, allowSpawn = true, timeoutMs = 60000, log = () => {} } = {}) {
     if (!repo) {
-        throw new Error(
-            "找不到 ExtCircuitJS 引擎仓库：先跑 `circuitlab.mjs setup`，或设置 EXTCIRCUIT_HOME 指向仓库根，或用 --repo 指定",
-        );
+        throw new EngineError("找不到 ExtCircuitJS 引擎仓库：先跑 `circuitlab.mjs setup`，或设置 EXTCIRCUIT_HOME 指向仓库根，或用 --repo 指定", {
+            code: "engine.not_found",
+            hint: "npx ee-circuit-draw-simulator setup（或 node <skill>/scripts/circuitlab.mjs setup）",
+        });
     }
     const { startAttachBackend } = await loadBackendModule(repo);
 
     const bases = base ? [base] : defaultBases();
     let chosen = null;
     const seen = [];
+    const occupied = [];
     for (const b of bases) {
-        const ok = await reachable(b);
-        seen.push(`${b}${ok ? " ✓" : " ✗"}`);
-        if (ok) {
+        const state = await probeBase(b);
+        seen.push(`${b} ${state === "engine" ? "✓" : state === "stranger" ? "⚠ 被别的程序占用" : "✗"}`);
+        if (state === "engine") {
             chosen = b;
             break;
         }
+        if (state === "stranger") occupied.push(b);
     }
 
     const opts = { timeoutMs, log };
@@ -242,22 +371,60 @@ export async function attach({ repo, base, allowSpawn = true, timeoutMs = 60000,
         return { backend, toolset: backend.toolset, base: chosen, via: backend.info?.bridgeVia ?? "attached" };
     }
     if (!allowSpawn) {
-        throw new Error(
+        throw new EngineError(
             `没有可达的后端（试过 ${seen.join(" / ")}）。先起一个：\n  cd ${repo} && node tools/ext.mjs serve --port 8080\n（还没构建过就先 node tools/ext.mjs build）`,
+            { code: "engine.unreachable", details: { candidates: seen, occupied } },
         );
     }
 
     // 有 dist 就走静态 serve（不依赖 vite 常驻）；没有 dist 只能 dev（需要 core install）
     const hasDist = fs.existsSync(path.join(repo, "dist", "circuitjs.html"));
-    const target = base ?? (hasDist ? "http://127.0.0.1:8080" : "http://127.0.0.1:5174");
-    const port = portOf(target);
-    log(`没有可达后端（${seen.join(" / ")}），拉起 ${hasDist ? "serve" : "dev"}（:${port}）…`);
+    const mode = hasDist ? "serve" : "dev";
+    // 以前这里硬编码 8080：默认候选列表明明有三个端口，自启却只认那个最容易被占的。
+    const candidates = base ? [portOf(base)] : hasDist ? [8080, 8081, 8090, 18734] : [5174, 5175, 5180, 18735];
 
-    startServer(repo, hasDist ? "serve" : "dev", port);
-    if (!(await waitFor(target))) {
-        throw new Error(
-            `自启后端失败（:${port} 起不来）。手动跑一遍看报错：\n  cd ${repo} && node tools/ext.mjs ${hasDist ? "serve" : "dev"} --port ${port}\n`
-                + (hasDist ? "" : "没构建过就先 node tools/ext.mjs core install && node tools/ext.mjs build"),
+    const portTried = [];
+    let port = null;
+    for (const p of candidates) {
+        if (!(await canBind(p))) {
+            portTried.push(`:${p} 已被占用`);
+            continue;
+        }
+        port = p;
+        break;
+    }
+    if (occupied.length) {
+        log(`${occupied.join(" / ")} 上有别的程序（/circuitjs.html 返回的不是引擎页面），跳过。`);
+    }
+    if (port == null) {
+        throw new EngineError(
+            `没有可用端口：${portTried.join("、")}。端口都被别的程序占着，引擎起不来。`,
+            {
+                code: "port.occupied",
+                hint: "先腾一个端口，或用 --base http://127.0.0.1:<端口> 指定一个空端口；也可以手动起后端再 --no-spawn 连它",
+                details: { tried: portTried, occupiedByOthers: occupied },
+            },
+        );
+    }
+    log(`没有可达后端（${seen.join(" / ")}），拉起 ${mode}（:${port}）…`);
+
+    const server = startServer(repo, mode, port);
+    const target = `http://127.0.0.1:${port}`;
+    const waited = await waitFor(target, { child: server.child });
+    if (!waited.ok) {
+        const why = waited.reason === "exited"
+            ? `进程退出了（exit ${waited.exit.code ?? "?"}）`
+            : `等了 ${Math.round(timeoutMs / 1000)} 秒没起来`;
+        const tail = server.stderr();
+        const looksInUse = /EADDRINUSE|address already in use/i.test(tail);
+        throw new EngineError(
+            `自启后端失败（:${port}，${why}）。${looksInUse ? "端口确实被占用了。" : ""}`,
+            {
+                code: looksInUse ? "port.occupied" : "engine.unreachable",
+                hint: `手动跑一遍看完整报错：\n  cd ${repo} && node tools/ext.mjs ${mode} --port ${port}`
+                    + (hasDist ? "" : "\n没构建过就先 node tools/ext.mjs core install && node tools/ext.mjs build"),
+                details: { port, reason: waited.reason, exit: waited.exit ?? null, stderr: tail || null, candidates: seen },
+            },
         );
     }
     const backend = await startAttachBackend({ ...opts, baseUrl: target, devServer: "off" });

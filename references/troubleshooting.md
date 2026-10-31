@@ -40,6 +40,10 @@
 | 导线一堆、元件 id 跳号 | 自动布线生成的 `WireElm` 也占 id | 正常现象；`circuit.elements` 已滤掉导线 |
 | `--jobs` 整批在启动前就失败 | 某个作业的电路来源解析不出来（语料名写错 / 文件不存在）——这是故意的：省掉一次浏览器启动 | 修好那个作业；作业之间的仿真失败才是逐个隔离的 |
 | `--jobs` 里某个作业 `ok:false` 但整体还有结果 | 单个作业失败不拖垮整批，整体 `ok` 也是 false（退出码 2） | 看 `jobs[].error`；其余作业的 `artifacts[]` 仍然可用 |
+| 8080 被别的程序占着（`/circuitjs.html` 返回 404，`/` 返回别人的页面） | 探活会区分「引擎 / 别的程序 / 没人应答」，自启时自动跳过被占端口换下一个 | 日志里会点名；实在没端口可用会报 `port.occupied`，用 `--base http://127.0.0.1:<空端口>` |
+| `sample.channels[]` 里没有 `freqEstimate` | 要么非周期（能量不在某个频率的整数倍上），要么采样太稀会混叠 | 看 `freqNote`；混叠就加大 `--points`，别拿 `vpp` 反推频率 |
+| `sample.omitted` 里有网名 | 正常：`--sample all` 默认略过 GND 与恒值网（是数字不是波形） | 需要保留就加 `--include-supply` |
+| `probe` 的 `incomplete[]` 里有路径 | 目录存在但缺 `tools/ext.mjs` 或 `packages/mcp`，是上次 setup 中断留下的半装状态 | 重跑 setup，或删掉该目录再装 |
 
 ## 分享与产物
 
@@ -49,6 +53,24 @@
 | 链接里没有我的仿真状态 | 设计如此：只装电路，不装时间和状态 | 对方从 t=0 开始（通常正是想要的） |
 | 单文件 HTML 里没有电路列表/中文 | `file://` 下 fetch 被 CORS 禁 | 已知限制，粘贴电路文本即可；仿真本身正常 |
 | SVG 在深色主题下看不清 | 电路图是引擎导出的白底矢量 | 必要时在回复里说明，或让用户点开文件看 |
+
+## 错误码（`error.code`）
+
+失败时 `error` 一定带 `code`，按它分支比匹配中文句子可靠：
+
+| code | 场景 | 能否就地解决 |
+|---|---|---|
+| `topology.shorted_device` | 器件被导线短路（三极管 C/E、MOS D/S 同网） | 换内置语料 / 补 layout；确属本意才 `--force` |
+| `engine.not_found` | 找不到引擎仓库（详见 `details.tried` / `details.incomplete`） | 跑 `setup` |
+| `engine.unreachable` | 后端连不上、也起不来 | 手动起后端，或去掉 `--no-spawn` |
+| `port.occupied` | 端口被别的程序占，且没有可换的 | `--base http://127.0.0.1:<空端口>` |
+| `artifact.not_generated` | 要求了产物却没生成（见 `artifactIssues[]`） | 看 `reason`，通常退回 SVG |
+| `net.unknown` | `--measure` / `--sample` 给了不存在的网名 | 看 `details.available` |
+| `param.unknown` | `--set` 的参数名对不上 | 看 `circuit.elements[].props` |
+| `circuit.not_in_corpus` | 内置语料里没这个名字 | `corpus --search <关键词>` |
+| `circuit.load_failed` | 网表载入失败 | 见 `unsupported[]`（多半是 `needs_layout`） |
+| `sim.step_failed` / `sim.read_failed` / `sim.reset_failed` | 引擎内部失败 | 先 `--shot` 看图，换内置语料对照 |
+| `usage.*` | 参数写法不对（`missing_circuit` / `bad_set` / `bad_jobs`…） | 按 `hint` 改 |
 
 ## 排查顺序（省时间）
 

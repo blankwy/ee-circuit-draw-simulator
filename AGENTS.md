@@ -31,6 +31,13 @@ simulation.
    ~1 s. `run --jobs @jobs.json` executes several jobs (different circuits, different outputs) against
    one backend — 7.1 s for three jobs versus 16.3 s as three runs. One job failing leaves the others
    intact and sets the overall `ok` to false; never drop that silently.
+9. **Branch on `error.code`, not on the message text.** Failures carry a stable code
+   (`topology.shorted_device`, `engine.not_found`, `engine.unreachable`, `port.occupied`,
+   `artifact.not_generated`, `net.unknown`, `param.unknown`, `circuit.not_in_corpus`,
+   `sim.step_failed`, `usage.*`). The Chinese prose is for humans.
+10. **A missing `freqEstimate` is a result, not a bug.** The frequency comes from a DFT over the
+    sample window; `periodic` / `tonal` / `components` say how much to trust it, and `freqNote`
+    explains the aliasing or non-periodic cases. Do not back one out of `vpp`.
 
 ## First run
 
@@ -41,6 +48,9 @@ node scripts/circuitlab.mjs setup    # if the engine is missing: clone + build (
 
 `stdout` is JSON only; diagnostics go to `stderr`. During development the CLI starts and stops its own
 static server, so there is no daemon to manage.
+
+Before publishing or after touching the engine, run `npm run verify` — it re-derives every number
+quoted in the README and fails on drift.
 
 ## Layout
 
