@@ -24,7 +24,8 @@
     "LICENSE",
     "assets/",
     "scripts/",
-    "references/"
+    "references/",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "setup": "node scripts/circuitlab.mjs setup",
