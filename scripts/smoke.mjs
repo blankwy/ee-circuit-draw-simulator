@@ -96,6 +96,10 @@ step("分压器 9 V / 1k / 2k");
     const tap = (j.circuit.nets ?? []).find((n) => (n.pins ?? []).includes("e2:1") && (n.pins ?? []).includes("e3:0"));
     const raw = tap ? j.measurements.values[tap.id] : undefined;
     check("分压点输出 (|V|)", { got: Math.abs(raw), want: 6, tol: 0.05 });
+    // 极性：divider.json 是"0 脚接热端"的接法，读数为负（第 3 节实测）。这条把
+    // "VoltageElm 的 1 脚是正端"钉住——文档写了、引擎换了的话这里会变红。
+    const negative = Number.isFinite(raw) && raw < 0;
+    CASES.push({ name: "极性：0 脚接热端得负值", got: negative ? 1 : 0, want: 1, tol: 0, unit: "", ok: negative });
 }
 
 // 5) 运放：增益 3（1 V 输入 → 3.00 V），用 --set 把 5 V 源降到 1 V 免得削顶
@@ -179,8 +183,20 @@ step("只给 --png 应自动补 SVG 并出 PNG");
     CASES.push({ name: "同时补出 SVG 中间件", got: hasSvg ? 1 : 0, want: 1, tol: 0, unit: "", ok: hasSvg });
 }
 
-// ── 汇总 ────────────────────────────────────────────────────────────────────
+// 11) 必填字段：二极管少了 modelName 要在载入阶段就点名，而不是等仿真停在 t=0
+//     说一句"引擎卡住或不收敛"——那正是上一轮反馈里最没用的一句。
+step("必填字段：diode 缺 modelName 应被点名");
+{
+    const j = run(["run", "--netlist", path.join(HERE, "..", "references", "examples", "diode-no-model.json"), "--step", "0.001"]);
+    if (!j.ok) throw new Error(`diode 运行失败：${JSON.stringify(j.error)}`);
+    const miss = j.circuit?.load?.missingProps ?? [];
+    const named = miss.length === 1 && miss[0].type === "DiodeElm" && miss[0].prop === "modelName";
+    CASES.push({ name: "缺 modelName 被点名", got: named ? 1 : 0, want: 1, tol: 0, unit: "", ok: named });
+    const told = (j.warnings ?? []).some((w) => /没写必填字段/.test(w));
+    CASES.push({ name: "审计写进 warnings", got: told ? 1 : 0, want: 1, tol: 0, unit: "", ok: told });
+}
 
+// ── 汇总 ────────────────────────────────────────────────────────────────────
 const failed = CASES.filter((c) => !c.ok);
 const pad = (s, n) => String(s).padEnd(n);
 process.stdout.write("\n");

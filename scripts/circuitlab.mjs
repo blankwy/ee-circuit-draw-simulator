@@ -299,6 +299,53 @@ function assertTopology(result, force) {
     );
 }
 
+// ── 必填字段审计：载入时就把"没写"说出来 ─────────────────────────────────────
+//
+// 有些字段不写，电路不会报错，只会变成一个"空器件"。二极管、三极管、MOS 的
+// modelName 就是这类：它决定的是器件特性，缺了就没有特性可言。症状不是异常，
+// 而是 engineSteps=0、读数全 0 —— 一句"引擎卡住或不收敛"，用户得自己猜。
+//
+// 实测（bfebc80 与 4004e1b 两版引擎）：二极管不写 modelName 时，引擎的
+// static 默认值（DiodeElm.lastModelName = "default"）会兜住，"不写"看起来没事。
+// 这份兜底是引擎内部实现，不同元件家族、不同版本并不一致 —— 所以这里不假装
+// 能判断"会不会出事"，只如实说"你没写这一项、引擎可能替你填了"。
+//
+// 在**载入前**对照源网表查：此时还没有引擎补过的默认值，能分清"用户没写"和
+// "引擎填了"。
+const REQUIRED_PROPS = {
+    DiodeElm: ["modelName"],
+    ZenerElm: ["modelName"],
+    LEDElm: ["modelName"],
+    TunnelDiodeElm: ["modelName"],
+    TransistorElm: ["modelName"],
+    MosfetElm: ["modelName"],
+    NMosfetElm: ["modelName"],
+    PMosfetElm: ["modelName"],
+};
+
+function auditRequiredProps(sourceText) {
+    let netlist;
+    try {
+        netlist = JSON.parse(sourceText);
+    } catch {
+        return []; // XML / 紧凑格式：解析不了就跳过，不是这里该报的错
+    }
+    const comps = netlist?.components;
+    if (!Array.isArray(comps)) return [];
+    const out = [];
+    for (const c of comps) {
+        const req = REQUIRED_PROPS[c?.type];
+        if (!req) continue;
+        for (const prop of req) {
+            const v = c.props?.[prop];
+            if (v === undefined || v === null || String(v).trim() === "") {
+                out.push({ element: String(c.id ?? "?"), type: c.type, prop });
+            }
+        }
+    }
+    return out;
+}
+
 /**
  * 带稳定 code 的错误。
  *
@@ -763,6 +810,15 @@ async function executeJob({ toolset, repo, outDir, o, sourceText, source }) {
             load: { stats: loaded.stats, warnings: (loaded.losses?.conflicts ?? []).length ? loaded.losses.conflicts : undefined },
         };
 
+        // 1a) 必填字段：载入前对照源网表查（此时还没有引擎补过的默认值）
+        const missingProps = auditRequiredProps(sourceText);
+        if (missingProps.length) {
+            const names = missingProps.map((m) => `${m.element}(${m.type}).${m.prop}`).join("、");
+            result.circuit.load.missingProps = missingProps;
+            warn(result, `这些元件没写必填字段：${names}。引擎可能用内部默认值兜住（二极管是 "default"），`
+                + "但不同元件家族/版本并不一致；仿真若停在 t=0、读数全 0，先补这一项。");
+        }
+
         // 1b) 拓扑闸：多端元件被短路就别往下跑了（--force 可放行）
         assertTopology(result, o.force === true);
 
@@ -799,7 +855,11 @@ async function executeJob({ toolset, repo, outDir, o, sourceText, source }) {
                     + "CLI 已自动分块，仍不足说明仿真卡住或不收敛。");
             }
             if (r.engineSteps === 0) {
-                warn(result, "仿真没有推进（engineSteps=0）：电路不收敛，或自动布局把导线画成了短路/开路。"
+                // 有明确线索就先说线索：这句泛泛的"卡住/不收敛"正是上一轮反馈里最没用的一句。
+                const lead = missingProps.length
+                    ? `最可能是没写必填字段：${missingProps.map((m) => `${m.element}.${m.prop}`).join("、")}，先补上；`
+                    : "";
+                warn(result, `仿真没有推进（engineSteps=0）：${lead}否则是电路不收敛，或自动布局把导线画成了短路/开路。`
                     + "先把 --shot 出张图看一眼；多端元件（运放/555/晶体管）建议改用内置语料 + --set。");
             }
         }
@@ -913,7 +973,11 @@ async function executeJob({ toolset, repo, outDir, o, sourceText, source }) {
             };
             if (!nets) result.sample.mode = "--sample all（已省略 GND 与恒值网）";
             if (!tEnd) {
-                warn(result, "采样期间仿真时间没有推进：电路不收敛，或布线把节点接错。建议换内置语料对照，或 --shot 看图。");
+                const lead = missingProps.length
+                    ? `最可能是没写必填字段：${missingProps.map((m) => `${m.element}.${m.prop}`).join("、")}，先补上；`
+                    : "";
+                warn(result, `采样期间仿真时间没有推进：${lead}否则是电路不收敛，或布线把节点接错。`
+                    + "建议换内置语料对照，或 --shot 看图。");
             }
             // 只给 --png 也要出图：栅格化本来就必须先生成 SVG，用户不关心中间文件。
             // （以前 png 嵌在 svg 分支里，只给 --png 时静默产出零个文件、exit 0。）

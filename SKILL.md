@@ -13,7 +13,7 @@ allowed-tools:
   - Glob
   - Grep
 metadata:
-  version: 0.3.1
+  version: 0.3.2
   homepage: https://github.com/blankwy/ee-circuit-draw-simulator
   engine: ExtCircuitJS (CircuitJS1 fork; real nodal-analysis simulator driven headlessly over an MCP bridge)
   trigger: 电路仿真、波形、元件参数、滤波器/振荡器/放大器、生成电路图、分享可交互电路
@@ -238,7 +238,7 @@ node <skill>/scripts/circuitlab.mjs run --jobs @jobs.json --out out
 | `backend_unavailable` / 找不到 Chrome | 装 Chrome 或 Edge；或设 `EXT_CHROME`/`EXT_PW_CORE` |
 | 改参 `applied: 0` / 参数名对不上 | 看 `circuit.elements[].props` 里的真实字段名（如 `capacitance` 不是 `capacitor`） |
 | **`拓扑错误：… 集电极 C 与 发射极 E 落在同一个网`** | 自动布线把器件的两个功率脚短接了。改用内置语料 + `--set`，或给网表补 `layout` 坐标；确属本意才 `--force` |
-| 读数全 0 / t 一直是 0 / `engineSteps=0` | 看 `warnings` 与 `topology`；多端元件优先换内置语料 |
+| 读数全 0 / t 一直是 0 / `engineSteps=0` | 先看 `circuit.load.missingProps`（二极管/三极管/MOS 缺 `modelName` 就记在这），再看 `warnings` 与 `topology`；多端元件优先换内置语料 |
 | 波形是一条直线 / `flat` 里有网名 | 该网没被驱动（悬空或未连接到源） |
 | 扫描出来的数不像理论值 | 先确认 `--settle` 够长（跳过暂态）、`--span` 覆盖 ≥3 周期 |
 | 链接打开是空白 | URL 被截断（>2000 字符），改用 `--share-out` 出分享页 |

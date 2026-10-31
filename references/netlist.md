@@ -19,9 +19,9 @@
     { "id": "g1", "type": "GroundElm", "props": {} }
   ],
   "nets": [
-    { "id": "in",  "pins": ["v1:0", "r1:0"] },
+    { "id": "in",  "pins": ["v1:1", "r1:0"] },
     { "id": "out", "pins": ["r1:1", "c1:0"] },
-    { "id": "gnd", "pins": ["v1:1", "c1:1", "g1:0"], "ground": true }
+    { "id": "gnd", "pins": ["v1:0", "c1:1", "g1:0"], "ground": true }
   ]
 }
 ```
@@ -42,6 +42,8 @@
 - **每个网 ≥ 2 个引脚**（地网可以只接 `GroundElm` + 元件地脚）。悬空节点会让引擎停在 t=0、读数全 0。
 - 不要写 `WireElm`：导线由布线算法生成。
 - 一个 `GroundElm` 只接 1 个网；需要多处接地就多放几个 `GroundElm`。
+- **`VoltageElm` 的 1 脚是正端、0 脚是负端**（实测，见第 3 节）。上面那个例子里正端
+  `v1:1` 接热端，所以读数是正的；把 0/1 接反不会报错，只是所有读数变号。
 - `nets[].id` 是给你自己看的名字，载入后会变成 `n0/n1…`；判断"哪个网是输出"靠 `circuit.nets[].pins`。
 
 ## 2. 常用元件（字段名 = `props` 里的键）
@@ -51,22 +53,42 @@
 | `ResistorElm` | 2 | `resistance`（Ω） |
 | `CapacitorElm` | 2 | `capacitance`（F）、`initialVoltage`、`seriesResistance` |
 | `InductorElm` | 2 | `inductance`（H）、`initialCurrent`、`saturationCurrent`、`seriesResistance` |
-| `VoltageElm` | 2 | `waveform`、`frequency`（Hz）、`maxVoltage`（V）、`bias`、`phaseShift`（°）、`dutyCycle`（0–1）、`riseTime`、`internalResistance` |
+| `VoltageElm` | 2 | `waveform`、`frequency`（Hz）、`maxVoltage`（V）、`bias`、`phaseShift`（°）、`dutyCycle`（0–1）、`riseTime`、`internalResistance`；**1 脚 = 正端，0 脚 = 负端** |
 | `CurrentElm` | 2 | `currentValue`（A）、`maxVoltage` |
 | `GroundElm` | 1 | `symbolType` |
 | `RailElm` | 1 | 供电轨（V+），值由仿真设置决定 |
 | `OutputElm` | 1 | 画布上的数值显示探针，不影响电路 |
 | `SwitchElm` | 2 | `position`（0/1）、`momentary`、`resistance` |
 | `PotElm` | 3 | `maxResistance`（Ω）、`position`（0–1）；引脚 0/1 = 两端，2 = 抽头 |
-| `DiodeElm` / `ZenerElm` | 2 | `modelName` |
+| `DiodeElm` / `ZenerElm` | 2 | `modelName`（**必填**，写 `"default"`） |
 | `LEDElm` | 2 | `colorR/colorG/colorB`、`maxBrightnessCurrent` |
 | `LampElm` | 2 | `nom_v`、`nom_pow`、`temp`、`warmTime`、`coolTime` |
 | `OpAmpElm` | 3 | `maxOut`、`minOut`、`gbw`、`gain`；引脚 0 = 同相输入，1 = 反相输入，2 = 输出 |
-| `TransistorElm` | 3 | `pnp`（布尔）、`beta`、`modelName` |
-| `MosfetElm` / `NMosfetElm` / `PMosfetElm` | 3 | `modelName` |
+| `TransistorElm` | 3 | `pnp`（布尔）、`beta`、`modelName`（**必填**） |
+| `MosfetElm` / `NMosfetElm` / `PMosfetElm` | 3 | `modelName`（**必填**） |
 | `TimerElm`（555） | 6–8 | 引脚数随标志变化（`hasGroundPin` 8 / `hasReset` 7 / 默认 6）——**建议直接用内置语料 `555*`** |
 
 其余 200+ 类见仓库 `packages/netlist/src/registry.json`（键是类名，`xmlAttrs[].field` 就是 props 的键）。
+
+### 必填字段：`modelName`
+
+二极管/稳压管/LED/三极管/MOS 的 `modelName` 决定的是器件特性 —— 缺了就不是"一个二极管"，
+而是一个没有特性的空壳。实测（钉住的 `bfebc80` 与本地 `4004e1b`）：不写时引擎会用内部
+静态默认值（`DiodeElm.lastModelName = "default"`）兜住，所以"不写"常常看起来没事；
+但这份兜底是引擎实现细节，不同家族/版本并不一致。兜不住时的症状是 `engineSteps=0`、
+读数全 0 —— 跟"电路画错了"长得一模一样。
+
+CLI 现在在载入阶段就把这类缺失点出来，并同时给出引擎实际填了什么：
+
+```json
+"load": {
+  "stats": { "components": 4, "wires": 12, "nets": 3 },
+  "missingProps": [ { "element": "d1", "type": "DiodeElm", "prop": "modelName" } ]
+}
+```
+
+同一份 `elements` 里能看到引擎补成了 `"modelName": "default"`。结论很简单：**显式写
+`"modelName": "default"`（或你的模型名），别依赖默认值**。
 
 ### `VoltageElm.waveform` 取值
 
@@ -135,6 +157,7 @@
 | `rc-lowpass.json` | R 1 k + C 100 n，AC 1 kHz | 扫频到 1.6 kHz 时 Vpp = 0.707× |
 | `halfwave-rectifier.json` | 二极管 + 1 k 负载，50 Hz | 输入 ±10 V、输出 0…9.43 V（半波） |
 | `shorted-transistor.json` | **反例**：三极管 C/E 接到同一个网 | CLI 直接报 `拓扑错误`，不仿真 |
+| `diode-no-model.json` | **反例**：二极管没写 `modelName` | `load.missingProps` 点名 `d1`，warning 说明引擎可能补了 `default` |
 
 **多端元件默认不要手写网表**：实测把「运放 + R1/R2 反馈」写成网表后，自动布线在这个拓扑上
 生成了重复/交叉导线（导出的 XML 里同一条 `<w>` 出现两次、还有一段竖线横穿元件），结果
@@ -162,6 +185,7 @@ node <skill>/scripts/circuitlab.mjs run --circuit amp-noninvert --set ResistorEl
 | `ok:false` + `error.message` 以 `拓扑错误` 开头 | 器件被短接（三极管 C/E 或 MOS 的 D/S 同网） | 改接线；这是器件失效，不是参数问题。确属本意才 `--force` |
 | `ok:false` + `unsupported[].code = needs_layout` | 多端元件无法自动布局 | 换 2 端元件实现，或改用内置语料 / 带 `layout` 坐标的网表 |
 | `invalid_json` / `invalid_compact` | JSON 语法错 | 检查引号与逗号 |
+| `load.missingProps` 非空，或 `warnings` 提到「没写必填字段」 | 二极管/三极管/MOS 缺 `modelName` | 补 `"modelName": "default"`；别依赖引擎默认值 |
 | 编译成功但读数全 0 | 悬空网、极性反了、或没推进 | 检查每网 ≥2 引脚，先 `--step 0.001`；看 `warnings` |
 | `warnings` 里出现「仿真没有推进」 | 不收敛，或布线画成了短路/开路 | `--shot` 看图；换内置语料对照；多端元件改用 `--circuit` |
 | `losses.conflicts` 非空 | 布线与元件本体冲突（拓扑仍正确） | 不影响数值，视觉上可能略挤 |

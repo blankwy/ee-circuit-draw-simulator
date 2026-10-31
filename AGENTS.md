@@ -38,6 +38,12 @@ simulation.
 10. **A missing `freqEstimate` is a result, not a bug.** The frequency comes from a DFT over the
     sample window; `periodic` / `tonal` / `components` say how much to trust it, and `freqNote`
     explains the aliasing or non-periodic cases. Do not back one out of `vpp`.
+11. **Write `modelName` explicitly.** Diode / zener / LED / transistor / MOSFET only mean something
+    with a model attached. The engine sometimes substitutes its own default and sometimes does not,
+    depending on family and version; when it does not, the sim stalls at `t=0` with all-zero readings
+    and looks exactly like a mis-wired circuit. `circuit.load.missingProps` lists what the netlist
+    omitted — treat it as a defect in the netlist, not a cosmetic warning, and add
+    `"modelName": "default"`.
 
 ## First run
 
