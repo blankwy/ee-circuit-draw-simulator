@@ -22,7 +22,8 @@
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
-    "assets/",
+    "assets/icon.svg",
+    "assets/icon-256.png",
     "scripts/",
     "references/",
     "CHANGELOG.md"
