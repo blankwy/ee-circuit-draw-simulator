@@ -35,7 +35,9 @@ jobs:
         run: node scripts/circuitlab.mjs setup
 
       - name: 引擎版本（写进日志，数字对不上时能对着看）
-        run: node scripts/circuitlab.mjs probe
+        # probe 是诊断命令：没有活动后端时它按设计返回 exit 2（ok:false），
+        # 而此时后端本来就没起（run 会自己拉起），不该让它判流水线失败。
+        run: node scripts/circuitlab.mjs probe || true
 
       # 用 setup 钉住的 commit 跑，结果才有可比性；引擎漂移会在这里变红，
       # 从而把"换引擎"变成一次需要显式确认的变更。
