@@ -1,6 +1,10 @@
 ---
 name: ee-circuit-draw-simulator
 description: "Run real circuit simulation instead of guessing: load or author a circuit, tweak part values, step deterministically, read node voltages, sample waveforms, sweep parameters, render SVG plots and schematics, and emit shareable interactive links. Use when a circuit/electronics answer needs real numbers or waveforms: filter cutoff, 555 duty cycle, op-amp gain, dividers, resonance, rectifier ripple, RC charging, why it will not oscillate. 需要真实数值或波形的电路问题与电路图：滤波器、555、运放、分压、谐振、整流、RC、起振排障。"
+slug: ee-circuit-draw-simulator
+displayName: 电子电路绘制仿真助手
+summary: 在真实电路仿真引擎上跑数、读波形、出图，而不是凭公式估数
+tags: [circuit, simulation, electronics, schematic, waveform, spice]
 license: GPL-2.0-or-later
 allowed-tools:
   - Bash
